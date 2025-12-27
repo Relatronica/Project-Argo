@@ -1,0 +1,50 @@
+appId: com.privacy-notes.app
+productName: Privacy Notes
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - build/**/*
+  - electron/**/*
+  - package.json
+  - "!node_modules/**/*"
+  - "node_modules/@sveltejs/**/*"
+  - "node_modules/svelte/**/*"
+  - "node_modules/vite/**/*"
+  - "node_modules/lucide-svelte/**/*"
+  - "node_modules/codemirror/**/*"
+  - "node_modules/@codemirror/**/*"
+  - "node_modules/@tiptap/**/*"
+  - "node_modules/marked/**/*"
+  - "node_modules/turndown/**/*"
+  - "node_modules/tweetnacl/**/*"
+  - "node_modules/tweetnacl-util/**/*"
+  - "node_modules/uuid/**/*"
+  - "node_modules/dompurify/**/*"
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  icon: electron/icons/icon.icns
+
+win:
+  target:
+    - nsis
+    - portable
+  icon: electron/icons/icon.ico
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: electron/icons/icon.png
+  category: Office
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
