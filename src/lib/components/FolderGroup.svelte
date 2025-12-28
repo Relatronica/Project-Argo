@@ -1,7 +1,12 @@
 <script>
+	import { onMount, onDestroy } from 'svelte';
 	import Icon from './Icon.svelte';
 	import NoteItem from './NoteItem.svelte';
-	import { updateFolderIcon, allFolders } from '../stores/folderStore.js';
+	import { updateFolderIcon, allFolders, deleteFolder, renameFolder } from '../stores/folderStore.js';
+	import { moveNoteToFolder, isNoteSearchMatch } from '../stores/notesStore.js';
+	
+	let dragOverCount = 0;
+	let isDragOver = false;
 
 	export let folderPath;
 	export let folderNotes = [];
@@ -16,6 +21,7 @@
 	export let onToggleFavorite;
 	export let onMoveNote;
 	export let onDeleteNote;
+	export let isNoteSearchMatchFn = null;
 	
 	// Make folderIcon reactive to store changes
 	$: currentFolderIcon = (() => {
@@ -32,10 +38,20 @@
 	
 	let showIconDialog = false;
 	let selectedIcon = currentFolderIcon;
+	let showMenu = false;
+	let showRenameDialog = false;
+	let newFolderName = '';
+	let menuElement;
+	let menuButtonElement;
 	
 	// Update selectedIcon when dialog opens
 	$: if (showIconDialog) {
 		selectedIcon = currentFolderIcon;
+	}
+	
+	// Update newFolderName when rename dialog opens
+	$: if (showRenameDialog) {
+		newFolderName = getFolderDisplayName(folderPath);
 	}
 	
 	// Available icons for folders (same as FolderManager)
@@ -79,6 +95,101 @@
 		updateFolderIcon(folderPath, selectedIcon);
 		showIconDialog = false;
 	}
+	
+	function handleMenuClick(event) {
+		event.stopPropagation();
+		showMenu = !showMenu;
+	}
+	
+	function handleClickOutside(event) {
+		if (showMenu && menuElement && menuButtonElement && 
+		    !menuElement.contains(event.target) && 
+		    !menuButtonElement.contains(event.target)) {
+			showMenu = false;
+		}
+	}
+	
+	async function handleDeleteFolder() {
+		if (!confirm(`Are you sure you want to delete folder "${getFolderDisplayName(folderPath)}"?\n\nNotes in this folder will be moved to root.`)) {
+			return;
+		}
+		
+		// Move all notes in this folder to root
+		for (const note of folderNotes) {
+			await moveNoteToFolder(note.id, null);
+		}
+		
+		// Delete the folder
+		deleteFolder(folderPath);
+		showMenu = false;
+	}
+	
+	function handleRenameFolder() {
+		showMenu = false;
+		showRenameDialog = true;
+	}
+	
+	function handleSaveRename() {
+		if (!newFolderName.trim()) {
+			alert('Folder name cannot be empty');
+			return;
+		}
+		
+		const parentPath = getParentPath(folderPath);
+		const newPath = parentPath ? `${parentPath}/${newFolderName.trim()}` : newFolderName.trim();
+		
+		if (newPath !== folderPath) {
+			// Update all notes in this folder to use the new path
+			folderNotes.forEach(note => {
+				moveNoteToFolder(note.id, newPath);
+			});
+			
+			// Rename the folder
+			renameFolder(folderPath, newPath);
+		}
+		
+		showRenameDialog = false;
+		newFolderName = '';
+	}
+	
+	function handleDragOver(event) {
+		event.preventDefault();
+		event.stopPropagation();
+		event.dataTransfer.dropEffect = 'move';
+		if (!isDragOver) {
+			isDragOver = true;
+			dragOverCount = 1;
+		}
+	}
+	
+	function handleDragLeave(event) {
+		event.preventDefault();
+		event.stopPropagation();
+		dragOverCount--;
+		if (dragOverCount <= 0) {
+			isDragOver = false;
+			dragOverCount = 0;
+		}
+	}
+	
+	async function handleDrop(event) {
+		event.preventDefault();
+		event.stopPropagation();
+		isDragOver = false;
+		dragOverCount = 0;
+		
+		try {
+			const data = JSON.parse(event.dataTransfer.getData('application/json'));
+			if (data.type === 'note' && data.id) {
+				// Don't move if already in this folder
+				if (data.folder !== folderPath) {
+					await moveNoteToFolder(data.id, folderPath);
+				}
+			}
+		} catch (error) {
+			console.error('Error handling drop:', error);
+		}
+	}
 
 	function getFolderDisplayName(path) {
 		if (!path) return 'Root';
@@ -101,6 +212,13 @@
 	$: folderDepth = getFolderDepth(folderPath);
 	$: parentPath = getParentPath(folderPath);
 	$: indentLevel = folderDepth > 0 ? folderDepth - 1 : 0;
+	
+	onMount(() => {
+		document.addEventListener('click', handleClickOutside);
+		return () => {
+			document.removeEventListener('click', handleClickOutside);
+		};
+	});
 </script>
 
 <div class="note-group" style="--folder-depth: {indentLevel};">
@@ -114,29 +232,54 @@
 			</div>
 		{/if}
 		
-		<button 
-			class="group-header"
-			class:collapsed={!isExpanded}
-			class:has-parent={folderDepth > 0}
-			class:root={folderDepth === 0}
-			on:click={() => onToggleFolder(folderPath)}
-			title={isExpanded ? "Collapse folder" : "Expand folder"}
-		>
-			<Icon 
-				name={isExpanded ? "chevron-down" : "chevron-right"} 
-				size={12} 
-				class="folder-chevron"
-			/>
-			<div class="folder-icon-wrapper" on:click|stopPropagation={handleChangeIcon} title="Change folder icon">
+		<div class="group-header-wrapper">
+			<button 
+				class="group-header"
+				class:collapsed={!isExpanded}
+				class:has-parent={folderDepth > 0}
+				class:root={folderDepth === 0}
+				class:drag-over={isDragOver}
+				on:click={() => onToggleFolder(folderPath)}
+				on:dragover={handleDragOver}
+				on:dragleave={handleDragLeave}
+				on:drop={handleDrop}
+				title={isExpanded ? "Collapse folder" : "Expand folder"}
+			>
 				<Icon 
-					name={currentFolderIcon} 
-					size={16}
-					class="folder-icon"
+					name={isExpanded ? "chevron-down" : "chevron-right"} 
+					size={12} 
+					class="folder-chevron"
 				/>
-			</div>
-			<span class="folder-name">{getFolderDisplayName(folderPath)}</span>
-			<span class="folder-count">({folderNotes.length})</span>
-		</button>
+				<div class="folder-icon-wrapper" on:click|stopPropagation={handleChangeIcon} title="Change folder icon">
+					<Icon 
+						name={currentFolderIcon} 
+						size={16}
+						class="folder-icon"
+					/>
+				</div>
+				<span class="folder-name">{getFolderDisplayName(folderPath)}</span>
+			</button>
+			<button
+				class="folder-menu-btn"
+				bind:this={menuButtonElement}
+				on:click={handleMenuClick}
+				title="Folder options"
+			>
+				<span class="menu-dots">⋯</span>
+			</button>
+			{#if showMenu}
+				<div class="folder-menu" bind:this={menuElement}>
+					<button class="menu-item" on:click={handleRenameFolder}>
+						<Icon name="edit" size={14} />
+						<span>Rename</span>
+					</button>
+					<button class="menu-item delete" on:click={handleDeleteFolder}>
+						<Icon name="trash" size={14} />
+						<span>Delete</span>
+					</button>
+				</div>
+			{/if}
+		</div>
 		
 		{#if showIconDialog}
 			<div class="dialog-overlay" on:click={() => showIconDialog = false}>
@@ -164,6 +307,36 @@
 				</div>
 			</div>
 		{/if}
+		
+		{#if showRenameDialog}
+			<div class="dialog-overlay" on:click={() => showRenameDialog = false}>
+				<div class="dialog" on:click|stopPropagation>
+					<h3>Rename Folder</h3>
+					<input 
+						type="text" 
+						bind:value={newFolderName}
+						placeholder="Folder name"
+						class="folder-input"
+						on:keydown={(e) => {
+							if (e.key === 'Enter') {
+								handleSaveRename();
+							} else if (e.key === 'Escape') {
+								showRenameDialog = false;
+								newFolderName = '';
+							}
+						}}
+						autofocus
+					/>
+					<div class="dialog-actions">
+						<button class="btn-secondary" on:click={() => {
+							showRenameDialog = false;
+							newFolderName = '';
+						}}>Cancel</button>
+						<button class="btn-primary" on:click={handleSaveRename}>Save</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 	
 	{#if isExpanded}
@@ -183,6 +356,7 @@
 						{togglingFavoriteId}
 						{deletingNoteId}
 						{compactView}
+						isSearchMatch={isNoteSearchMatchFn ? isNoteSearchMatchFn(note) : false}
 						{onSelectNote}
 						{onToggleFavorite}
 						{onMoveNote}
@@ -273,6 +447,7 @@
 		transition: var(--transition);
 		text-align: left;
 		margin-left: calc(var(--folder-depth, 0) * 1.5rem);
+		min-width: 0;
 	}
 	
 	.group-header:not(.collapsed) {
@@ -292,6 +467,12 @@
 		background: var(--bg-secondary);
 		color: var(--text-primary);
 		transform: translateX(2px);
+	}
+	
+	.group-header.drag-over {
+		background: var(--accent-light);
+		border: 2px dashed var(--accent-color);
+		border-radius: var(--radius-sm);
 	}
 	
 	.group-header.has-parent:hover {
@@ -370,6 +551,22 @@
 		margin: 0 0 1rem 0;
 		font-size: 1.1rem;
 		color: var(--text-primary);
+	}
+	
+	.folder-input {
+		width: 100%;
+		padding: 0.75rem;
+		background: var(--input-bg);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		color: var(--text-primary);
+		font-size: 0.9rem;
+		margin-bottom: 1rem;
+	}
+	
+	.folder-input:focus {
+		outline: none;
+		border-color: var(--accent-color);
 	}
 	
 	.icon-selector-section {
@@ -465,14 +662,91 @@
 		font-weight: 500;
 	}
 	
-	.folder-count {
-		font-size: 0.7rem;
-		opacity: 0.6;
-		font-weight: 500;
+	.group-header-wrapper {
+		position: relative;
+		display: flex;
+		align-items: center;
+		width: 100%;
+	}
+	
+	.group-header-wrapper:hover .folder-menu-btn {
+		opacity: 1;
+	}
+	
+	.folder-menu-btn {
+		opacity: 0;
+		background: transparent;
+		border: none;
 		color: var(--text-muted);
-		background: var(--bg-primary);
-		padding: 0.15rem 0.4rem;
+		cursor: pointer;
+		padding: 0.25rem 0.5rem;
 		border-radius: var(--radius-sm);
+		transition: var(--transition);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin-left: auto;
+		margin-right: 0.25rem;
+		flex-shrink: 0;
+		line-height: 1;
+	}
+	
+	.menu-dots {
+		font-size: 1.2rem;
+		line-height: 1;
+		letter-spacing: -0.1em;
+		transform: rotate(90deg);
+		display: inline-block;
+	}
+	
+	.folder-menu-btn:hover {
+		background: var(--bg-tertiary);
+		color: var(--text-primary);
+	}
+	
+	.folder-menu {
+		position: absolute;
+		top: 100%;
+		right: 0.25rem;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+		min-width: 150px;
+		z-index: 1000;
+		margin-top: 0.25rem;
+		padding: 0.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+	
+	.menu-item {
+		width: 100%;
+		padding: 0.5rem 0.75rem;
+		background: none;
+		border: none;
+		color: var(--text-primary);
+		text-align: left;
+		cursor: pointer;
+		transition: var(--transition);
+		font-size: 0.85rem;
+		border-radius: var(--radius-sm);
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	
+	.menu-item:hover {
+		background: var(--bg-tertiary);
+	}
+	
+	.menu-item.delete {
+		color: var(--error-color);
+	}
+	
+	.menu-item.delete:hover {
+		background: rgba(239, 68, 68, 0.1);
 	}
 	
 	.folder-notes {

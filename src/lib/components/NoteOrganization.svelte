@@ -142,41 +142,45 @@
 <style>
 	.organization-controls {
 		position: relative;
+		width: 100%;
 	}
 	
 	.organization-btn {
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-color);
-		color: var(--text-secondary);
-		font-size: 0.85rem;
+		background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+		border: none;
+		color: white;
+		font-size: 0.75rem;
 		cursor: pointer;
-		padding: 0.5rem;
-		border-radius: var(--radius-sm);
+		padding: 0.75rem 0.75rem;
+		border-radius: var(--radius-md);
 		transition: var(--transition);
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		flex-shrink: 0;
-		white-space: nowrap;
-		max-width: 100%;
+		justify-content: center;
+		gap: 0.5rem;
+		width: 100%;
+		font-weight: 500;
+		box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+	}
+	
+	.organization-btn :global(.icon) {
+		font-size: 1rem;
 	}
 	
 	.organization-btn span {
 		font-size: 0.75rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	
-	@media (max-width: 350px) {
-		.organization-btn span {
-			display: none;
-		}
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
 	}
 	
 	.organization-btn:hover {
-		background: var(--bg-secondary);
-		border-color: var(--border-hover);
-		color: var(--text-primary);
+		background: linear-gradient(135deg, #fbbf24 0%, #fcd34d 100%);
+		transform: translateY(-2px);
+		box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+	}
+	
+	.organization-btn:active {
+		transform: translateY(0);
 	}
 	
 	.organization-menu {
@@ -257,4 +261,5 @@
 		cursor: pointer;
 	}
 </style>
+
 

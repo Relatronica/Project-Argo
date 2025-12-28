@@ -112,8 +112,10 @@ export function groupByTags(notes) {
 
 /**
  * Group notes by folders
+ * @param {Array} notes - Array of notes to group
+ * @param {Array} allFolders - Optional array of all folders (including empty ones)
  */
-export function groupByFolders(notes) {
+export function groupByFolders(notes, allFolders = []) {
 	const groups = {
 		'': [] // Root folder
 	};
@@ -124,6 +126,14 @@ export function groupByFolders(notes) {
 			groups[folder] = [];
 		}
 		groups[folder].push(note);
+	});
+	
+	// Add all folders from allFolders (including empty ones)
+	allFolders.forEach(folder => {
+		const folderPath = typeof folder === 'string' ? folder : folder.path;
+		if (!groups[folderPath]) {
+			groups[folderPath] = [];
+		}
 	});
 	
 	// Sort folders alphabetically, with root first
@@ -143,8 +153,11 @@ export function groupByFolders(notes) {
 
 /**
  * Organize notes based on preferences
+ * @param {Array} notes - Array of notes to organize
+ * @param {Object} preferences - Organization preferences
+ * @param {Array} allFolders - Optional array of all folders (including empty ones)
  */
-export function organizeNotes(notes, preferences) {
+export function organizeNotes(notes, preferences, allFolders = []) {
 	let organized = [...notes];
 	
 	// Show favorites first if enabled
@@ -163,7 +176,7 @@ export function organizeNotes(notes, preferences) {
 	} else if (preferences.groupBy === 'tags') {
 		return { type: 'tags', groups: groupByTags(organized) };
 	} else if (preferences.groupBy === 'folders') {
-		return { type: 'folders', groups: groupByFolders(organized) };
+		return { type: 'folders', groups: groupByFolders(organized, allFolders) };
 	}
 	
 	return { type: 'none', notes: organized };

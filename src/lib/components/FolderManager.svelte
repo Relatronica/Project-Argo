@@ -99,7 +99,7 @@
 		title="Create new folder"
 	>
 		<Icon name="folderOpen" size={14} />
-		<span>New Folder</span>
+		<span>Folder</span>
 	</button>
 	
 	{#if showCreateDialog}
@@ -198,41 +198,49 @@
 	.folder-manager {
 		display: flex;
 		align-items: center;
+		width: 100%;
 	}
 	
 	.create-folder-btn {
-		background: var(--bg-tertiary);
-		border: 1px solid var(--border-color);
+		font-size: 0.8rem;
+		font-weight: 600;
 		color: var(--text-secondary);
-		font-size: 0.85rem;
-		cursor: pointer;
-		padding: 0.5rem;
+		padding: 0.5rem 0.875rem;
+		background: transparent;
 		border-radius: var(--radius-sm);
-		transition: var(--transition);
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
+		gap: 0.5rem;
+		flex: 1;
+		border: none;
+		cursor: pointer;
+		transition: var(--transition);
+		text-align: left;
+		width: 100%;
+	}
+	
+	.create-folder-btn :global(.icon) {
+		font-size: 16px;
+		color: var(--accent-color);
+		opacity: 0.9;
 		flex-shrink: 0;
-		white-space: nowrap;
-		max-width: 100%;
 	}
 	
 	.create-folder-btn span {
-		font-size: 0.75rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	
-	@media (max-width: 350px) {
-		.create-folder-btn span {
-			display: none;
-		}
+		flex: 1;
+		text-transform: none;
+		letter-spacing: normal;
+		font-weight: 500;
 	}
 	
 	.create-folder-btn:hover {
 		background: var(--bg-secondary);
-		border-color: var(--border-hover);
 		color: var(--text-primary);
+		transform: translateX(2px);
+	}
+	
+	.create-folder-btn:active {
+		transform: translateX(0);
 	}
 	
 	.dialog-overlay {
@@ -448,4 +456,5 @@
 		color: var(--accent-color);
 	}
 </style>
+
 

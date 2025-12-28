@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import { isUnlocked } from '../lib/stores/keyStore.js';
 	import { initializeAutoLock, recordActivity } from '../lib/utils/autoLock.js';
-	import { masterKey, currentNote, saveCurrentNote, createNewNote, saveStatus, updateNoteTitle, updateNoteColor, toggleNoteFavorite, moveNoteToFolder, deleteNoteById } from '../lib/stores/notesStore.js';
+	import { masterKey, currentNote, saveCurrentNote, createNewNote, saveStatus, updateNoteTitle, updateNoteColor, toggleNoteFavorite, moveNoteToFolder, deleteNoteById, allTags } from '../lib/stores/notesStore.js';
 	import { allFolders } from '../lib/stores/folderStore.js';
 	import UnlockScreen from '../lib/components/UnlockScreen.svelte';
 	import NoteList from '../lib/components/NoteList.svelte';
@@ -12,8 +12,10 @@
 	import ExportImport from '../lib/components/ExportImport.svelte';
 	import MoveMenu from '../lib/components/MoveMenu.svelte';
 	import Icon from '../lib/components/Icon.svelte';
+	import TagManager from '../lib/components/TagManager.svelte';
 	import { extractNoteTitle } from '../lib/utils/noteHelpers.js';
 	import { saveFileDialog } from '../lib/utils/electronFileAPI.js';
+	import { isDarkTheme, toggleTheme } from '../lib/stores/themeStore.js';
 
 	let sidebarOpen = true;
 	let editingTitle = false;
@@ -362,17 +364,19 @@
 		{/if}
 		<div class="sidebar" class:collapsed={!sidebarOpen}>
 			<div class="sidebar-header">
-				<div class="app-logo">
-					<svg width="32" height="32" viewBox="0 0 64 64" fill="none">
-						<rect width="64" height="64" rx="12" fill="var(--accent-color)"/>
-						<path d="M20 20h24v24H20z" fill="white" opacity="0.2"/>
-						<path d="M32 16v32M16 32h32" stroke="white" stroke-width="3" stroke-linecap="round"/>
-					</svg>
+				<div class="app-header-content">
+					<Icon name="lock" size={16} class="app-icon" />
+					<div class="app-title">
+						<h1>Privacy Notes</h1>
+					</div>
 				</div>
-				<div class="app-title">
-					<h1>Privacy Notes</h1>
-					<p class="app-subtitle">Encrypted & Local</p>
-				</div>
+				<button 
+					class="sidebar-close-btn" 
+					on:click={toggleSidebar} 
+					title="Close sidebar"
+				>
+					<Icon name="x" size={16} />
+				</button>
 			</div>
 			<SearchBar />
 			<NoteList />
@@ -380,49 +384,139 @@
 
 		<div class="main-content">
 			<div class="toolbar">
-				<div class="toolbar-left">
-					<button class="sidebar-toggle" on:click={toggleSidebar} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}>
+			<div class="toolbar-left">
+				{#if !sidebarOpen}
+					<button
+						class="sidebar-open-btn"
+						on:click={toggleSidebar}
+						title="Open sidebar"
+					>
 						<Icon name="menu" size={18} />
 					</button>
-					{#if $currentNote}
-						{#if $currentNote.color}
-							<div 
-								class="header-color-indicator" 
-								style="background-color: {$currentNote.color};"
-								on:click={handleChangeColor}
-								title="Change note color"
-							></div>
-						{:else}
-							<div 
-								class="header-color-indicator no-color" 
-								on:click={handleChangeColor}
-								title="Add note color"
-							></div>
-						{/if}
-						{#if editingTitle}
-							<input
-								type="text"
-								class="note-title-input"
-								bind:value={titleInput}
-								on:blur={handleTitleBlur}
-								on:keydown={handleTitleKeydown}
-								autofocus
-							/>
-						{:else}
-							<h1 
-								class="note-title" 
-								on:click={() => editingTitle = true}
-								title="Click to edit title"
-							>
-								{$currentNote.title || $currentNote.extractTitle()}
-							</h1>
-						{/if}
+				{/if}
+				{#if $currentNote}
+					<TagManager
+						tags={$currentNote.tags}
+						availableTags={$allTags}
+						on:change={(e) => {
+							if ($currentNote) {
+								$currentNote.tags = e.detail.tags;
+							}
+						}}
+					/>
+					{#if $currentNote.color}
+						<div 
+							class="header-color-indicator" 
+							style="background-color: {$currentNote.color};"
+							on:click={handleChangeColor}
+							title="Change note color"
+						></div>
+					{:else}
+						<div 
+							class="header-color-indicator no-color" 
+							on:click={handleChangeColor}
+							title="Add note color"
+						></div>
 					{/if}
-				</div>
+					{#if editingTitle}
+						<input
+							type="text"
+							class="note-title-input"
+							bind:value={titleInput}
+							on:blur={handleTitleBlur}
+							on:keydown={handleTitleKeydown}
+							autofocus
+						/>
+					{:else}
+						<h1 
+							class="note-title" 
+							on:click={() => editingTitle = true}
+							title="Click to edit title"
+						>
+							{$currentNote.title || $currentNote.extractTitle()}
+						</h1>
+					{/if}
+				{/if}
+			</div>
 
-				<div class="toolbar-right">
-					<ExportImport />
-				</div>
+			<div class="toolbar-right">
+				{#if $currentNote}
+					<!-- Status Info -->
+					<div class="header-status">
+						<div class="header-info save-status" class:saving={$saveStatus === 'saving'} class:saved={$saveStatus === 'saved' || $saveStatus === 'idle'} class:error={$saveStatus === 'error'}>
+							{#if $saveStatus === 'saving'}
+								<Icon name="loader" size={14} class="spinning" />
+								<span>Saving...</span>
+							{:else if $saveStatus === 'error'}
+								<Icon name="alertTriangle" size={14} />
+								<span>Save failed</span>
+							{:else}
+								<Icon name="check-circle" size={14} />
+								<span>Saved</span>
+							{/if}
+						</div>
+						{#if $currentNote.encrypted}
+							<div class="header-info encrypted">
+								<Icon name="lock" size={14} />
+								<span>Encrypted</span>
+							</div>
+						{/if}
+						<div class="header-info">
+							<Icon name="calendar" size={14} />
+							<span>{new Date($currentNote.updated).toLocaleDateString()}</span>
+						</div>
+					</div>
+					
+					<!-- Delete Button -->
+					<button
+						class="header-btn delete-btn"
+						on:click={handleDeleteNote}
+						disabled={deletingNoteId === $currentNote.id}
+						title="Delete note"
+					>
+						<Icon name="trash" size={16} />
+					</button>
+					
+					<button
+						class="mode-toggle-btn"
+						class:active={$currentNote.mode === 'whiteboard'}
+						on:click={async () => {
+							if ($currentNote) {
+								$currentNote.mode = $currentNote.mode === 'text' ? 'whiteboard' : 'text';
+								const { saveCurrentNote } = await import('../lib/stores/notesStore.js');
+								await saveCurrentNote();
+							}
+						}}
+						title={$currentNote.mode === 'text' ? 'Switch to Whiteboard' : 'Switch to Text'}
+					>
+						{#if $currentNote.mode === 'text'}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+								<line x1="9" y1="3" x2="9" y2="21"></line>
+								<line x1="3" y1="9" x2="21" y2="9"></line>
+							</svg>
+							<span>Whiteboard</span>
+						{:else}
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+								<polyline points="14 2 14 8 20 8"></polyline>
+								<line x1="16" y1="13" x2="8" y2="13"></line>
+								<line x1="16" y1="17" x2="8" y2="17"></line>
+								<polyline points="10 9 9 9 8 9"></polyline>
+							</svg>
+							<span>Text</span>
+						{/if}
+					</button>
+				{/if}
+				<button 
+					class="theme-toggle-btn" 
+					on:click={toggleTheme}
+					title={$isDarkTheme ? "Passa alla modalità chiara" : "Passa alla modalità scura"}
+				>
+					<Icon name={$isDarkTheme ? 'sun' : 'moon'} size={18} />
+				</button>
+				<ExportImport />
+			</div>
 			</div>
 			<div class="editor-area">
 				{#if $currentNote}
@@ -433,72 +527,6 @@
 					</div>
 				{/if}
 				
-				{#if $currentNote}
-					<div class="floating-toolbar">
-						<div class="toolbar-left">
-							<div class="toolbar-info save-status" class:saving={$saveStatus === 'saving'} class:saved={$saveStatus === 'saved' || $saveStatus === 'idle'} class:error={$saveStatus === 'error'}>
-								{#if $saveStatus === 'saving'}
-									<Icon name="loader" size={16} class="spinning" />
-									<span>Saving...</span>
-								{:else if $saveStatus === 'error'}
-									<Icon name="alertTriangle" size={16} />
-									<span>Save failed</span>
-								{:else}
-									<Icon name="check-circle" size={16} />
-									<span>Saved</span>
-								{/if}
-							</div>
-							{#if $currentNote.encrypted}
-								<div class="toolbar-info encrypted">
-									<Icon name="lock" size={16} />
-									<span>Encrypted</span>
-								</div>
-							{/if}
-							<div class="toolbar-info">
-								<Icon name="calendar" size={16} />
-								<span>{new Date($currentNote.updated).toLocaleDateString()}</span>
-							</div>
-						</div>
-						
-						<div class="toolbar-center">
-							<button
-								class="toolbar-btn"
-								class:active={$currentNote.favorite}
-								on:click={handleToggleFavorite}
-								disabled={togglingFavoriteId === $currentNote.id}
-								title={$currentNote.favorite ? "Remove from favorites" : "Add to favorites"}
-							>
-								<Icon name="star" size={18} />
-							</button>
-							<button
-								class="toolbar-btn"
-								on:click={handleMoveNote}
-								title="Move to folder"
-								bind:this={moveButtonRef}
-							>
-								<Icon name="folderOpen" size={18} />
-							</button>
-							<button
-								class="toolbar-btn delete"
-								on:click={handleDeleteNote}
-								disabled={deletingNoteId === $currentNote.id}
-								title="Delete note"
-							>
-								<Icon name="trash" size={18} />
-							</button>
-						</div>
-						
-						<div class="toolbar-right-actions">
-							<button 
-								class="toolbar-btn" 
-								on:click={exportProtectedNote} 
-								title="Export as Secure Note (.pnote)"
-							>
-								<Icon name="download" size={18} />
-							</button>
-						</div>
-					</div>
-				{/if}
 			</div>
 		</div>
 		
@@ -617,8 +645,8 @@
 		display: flex;
 		height: 100vh;
 		overflow: hidden;
-		background: var(--bg-primary, #1a1a1a);
-		color: var(--text-primary, #fff);
+		background: var(--bg-primary);
+		color: var(--text-primary);
 		/* Spazio aggiuntivo per barra titolo macOS */
 		padding-top: env(titlebar-area-height, 0px);
 	}
@@ -634,23 +662,34 @@
 		background: var(--sidebar-bg);
 		overflow: hidden;
 		flex-shrink: 0;
+		position: relative;
 	}
 	
 	.sidebar-header {
-		padding: 1.25rem 1rem;
+		padding: 0.75rem 1rem;
 		border-bottom: 1px solid var(--sidebar-border);
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
 		background: var(--sidebar-bg);
 		flex-shrink: 0;
-	}
-	
-	.app-logo {
-		flex-shrink: 0;
+		position: relative;
 		display: flex;
 		align-items: center;
-		justify-content: center;
+		justify-content: space-between;
+	}
+	
+	.app-header-content {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.875rem;
+		flex: 1;
+		min-width: 0;
+	}
+	
+	.app-icon {
+		font-size: 16px;
+		color: var(--accent-color);
+		opacity: 0.9;
+		flex-shrink: 0;
 	}
 	
 	.app-title {
@@ -660,19 +699,34 @@
 	
 	.app-title h1 {
 		margin: 0;
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: var(--text-primary);
-		letter-spacing: -0.02em;
-		line-height: 1.2;
+		font-size: 0.8rem;
+		font-weight: 600;
+		color: var(--text-secondary);
+		letter-spacing: normal;
+		line-height: 1.4;
+		text-transform: none;
 	}
 	
-	.app-subtitle {
-		margin: 0.125rem 0 0 0;
-		font-size: 0.75rem;
+	.sidebar-close-btn {
+		background: transparent;
+		border: none;
 		color: var(--text-muted);
-		font-weight: 500;
-		letter-spacing: 0.01em;
+		cursor: pointer;
+		padding: 0.25rem;
+		border-radius: var(--radius-sm);
+		transition: var(--transition);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		margin-right: 0.5rem;
+		opacity: 0.7;
+	}
+	
+	.sidebar-close-btn:hover {
+		background: var(--bg-tertiary);
+		color: var(--text-primary);
+		opacity: 1;
 	}
 
 	.sidebar.collapsed {
@@ -698,13 +752,15 @@
 	}
 
 	.toolbar {
-		padding: 0.875rem 1.25rem;
+		padding: var(--spacing-md) var(--spacing-xl);
 		border-bottom: 1px solid var(--border-color);
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		background: var(--bg-secondary);
-		box-shadow: var(--shadow);
+		box-shadow: var(--shadow-sm);
+		backdrop-filter: blur(8px);
+		position: relative;
 	}
 
 	.toolbar-left {
@@ -712,74 +768,370 @@
 		align-items: center;
 		gap: 1rem;
 	}
+	
+	.sidebar-open-btn {
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
+		color: var(--text-secondary);
+		cursor: pointer;
+		padding: var(--spacing-sm);
+		border-radius: var(--radius);
+		transition: var(--transition);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.25rem;
+		height: 2.25rem;
+	}
+	
+	.sidebar-open-btn:hover {
+		background: var(--bg-secondary);
+		border-color: var(--border-hover);
+		color: var(--text-primary);
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-xs);
+	}
+	
+	.sidebar-open-btn:active {
+		transform: translateY(0);
+	}
 
 	.toolbar-right {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 	}
+	
+	.header-status {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-right: 0.5rem;
+		padding-right: 0.75rem;
+		border-right: 1px solid var(--border-color);
+	}
+	
+	.header-info {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		white-space: nowrap;
+	}
+	
+	.header-info.save-status {
+		font-weight: 500;
+	}
+	
+	.header-info.save-status.saving {
+		color: var(--accent-color);
+	}
+	
+	.header-info.save-status.saving :global(.icon) {
+		color: var(--accent-color);
+	}
+	
+	.header-info.save-status.saved {
+		color: var(--success-color, #10b981);
+	}
+	
+	.header-info.save-status.saved :global(.icon) {
+		color: var(--success-color, #10b981);
+	}
+	
+	.header-info.save-status.error {
+		color: var(--error-color, #ef4444);
+	}
+	
+	.header-info.save-status.error :global(.icon) {
+		color: var(--error-color, #ef4444);
+	}
+	
+	.header-info.save-status :global(.spinning) {
+		animation: spin 1s linear infinite;
+	}
+	
+	.header-info.encrypted {
+		color: var(--success-color, #10b981);
+		font-weight: 500;
+	}
+	
+	.header-info.encrypted :global(.icon) {
+		color: var(--success-color, #10b981);
+	}
+	
+	.header-btn {
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		padding: 0.5rem;
+		cursor: pointer;
+		color: var(--text-secondary);
+		transition: var(--transition);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 36px;
+		height: 36px;
+		font-size: var(--font-size-base);
+	}
+	
+	.header-btn:hover {
+		background: var(--bg-secondary);
+		border-color: var(--border-hover);
+		color: var(--text-primary);
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-xs);
+	}
+	
+	.header-btn:active {
+		transform: translateY(0);
+	}
+	
+	.header-btn.delete-btn {
+		color: var(--error-color, #ef4444);
+		border-color: var(--error-color, #ef4444);
+	}
+	
+	.header-btn.delete-btn:hover {
+		background: var(--error-color, #ef4444);
+		color: white;
+		border-color: var(--error-color, #ef4444);
+	}
+	
+	.header-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+		transform: none;
+	}
 
 	.sidebar-toggle {
 		background: var(--bg-tertiary);
 		border: 1px solid var(--border-color);
 		color: var(--text-secondary);
-		font-size: 1rem;
+		font-size: var(--font-size-base);
 		cursor: pointer;
-		padding: 0.5rem;
-		border-radius: var(--radius-sm);
+		padding: var(--spacing-sm);
+		border-radius: var(--radius);
 		transition: var(--transition);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 2rem;
-		height: 2rem;
+		width: 2.25rem;
+		height: 2.25rem;
+		position: relative;
+		overflow: visible;
 	}
-	
-	.sidebar-toggle :global(.icon) {
+
+	.icon-wrapper {
+		position: relative;
+		width: 18px;
+		height: 18px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.sidebar-icon {
+		position: absolute;
+		transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), 
+		            opacity 0.25s ease,
+		            color 0.2s ease;
 		color: var(--text-secondary);
+		transform: rotate(0deg) scale(1);
+	}
+
+	.sidebar-toggle:hover .sidebar-icon {
+		color: var(--text-primary);
 	}
 
 	.sidebar-toggle:hover {
 		background: var(--bg-secondary);
 		border-color: var(--border-hover);
 		color: var(--text-primary);
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-xs);
 	}
 
+	.sidebar-toggle:hover .icon-wrapper {
+		transform: scale(1.1);
+	}
+
+	.sidebar-toggle:active {
+		transform: translateY(0);
+	}
+
+	.sidebar-toggle:active .icon-wrapper {
+		transform: scale(0.95);
+	}
+
+	/* Animazione quando la sidebar si apre - icona menu diventa X */
+	.sidebar-toggle.open .sidebar-icon {
+		transform: rotate(180deg) scale(1);
+		animation: iconSpin 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	@keyframes iconSpin {
+		0% {
+			transform: rotate(0deg) scale(1);
+		}
+		50% {
+			transform: rotate(90deg) scale(0.85);
+		}
+		100% {
+			transform: rotate(180deg) scale(1);
+		}
+	}
+
+	/* Animazione quando la sidebar si chiude - icona X diventa menu */
+	.sidebar-toggle:not(.open) .sidebar-icon {
+		animation: iconSpinReverse 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+	}
+
+	@keyframes iconSpinReverse {
+		0% {
+			transform: rotate(180deg) scale(1);
+		}
+		50% {
+			transform: rotate(90deg) scale(0.85);
+		}
+		100% {
+			transform: rotate(0deg) scale(1);
+		}
+	}
+
+	.theme-toggle-btn {
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		padding: 0.5rem;
+		cursor: pointer;
+		color: var(--text-secondary);
+		transition: var(--transition);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 36px;
+		height: 36px;
+		font-size: var(--font-size-base);
+	}
+
+	.theme-toggle-btn:hover {
+		background: var(--bg-secondary);
+		border-color: var(--border-hover);
+		color: var(--text-primary);
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-xs);
+	}
+
+	.theme-toggle-btn:active {
+		transform: translateY(0);
+	}
+
+	.header-color-indicator {
+		width: 1.25rem;
+		height: 1.25rem;
+		border-radius: 4px;
+		cursor: pointer;
+		transition: var(--transition);
+		flex-shrink: 0;
+		border: 1px solid var(--border-color);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+	}
+
+	.header-color-indicator.no-color {
+		border: 1px solid var(--border-color);
+		background: white;
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+
+	.header-color-indicator:hover {
+		transform: scale(1.1);
+		box-shadow: 0 0 0 2px var(--accent-color);
+		z-index: 1;
+	}
+
+	.header-color-indicator.no-color:hover {
+		background: var(--bg-secondary);
+		border-color: var(--accent-color);
+	}
 
 	.note-title {
-		font-weight: 700;
+		font-weight: var(--font-weight-bold);
 		color: var(--text-primary);
-		font-size: 1.1rem;
+		font-size: var(--font-size-lg);
 		flex: 1;
 		margin: 0;
-		letter-spacing: -0.025em;
+		letter-spacing: var(--letter-spacing-tight);
 		cursor: pointer;
 		user-select: none;
-		transition: color 0.2s ease;
+		transition: var(--transition);
 	}
 	
 	.note-title:hover {
 		color: var(--accent-color);
 	}
 	
+	.mode-toggle-btn {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		color: var(--text-secondary);
+		cursor: pointer;
+		transition: var(--transition);
+		font-size: 0.85rem;
+		font-weight: 500;
+		height: 36px;
+	}
+	
+	.mode-toggle-btn:hover {
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+		border-color: var(--border-hover);
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-xs);
+	}
+	
+	.mode-toggle-btn:active {
+		transform: translateY(0);
+	}
+	
+	.mode-toggle-btn.active {
+		background: var(--accent-light);
+		color: var(--accent-color);
+		border-color: var(--accent-color);
+	}
+	
+	.mode-toggle-btn svg {
+		flex-shrink: 0;
+	}
+	
 	.note-title-input {
 		background: var(--bg-tertiary);
 		border: 1px solid var(--accent-color);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		color: var(--text-primary);
-		font-size: 1.1rem;
-		font-weight: 700;
-		padding: 0.25rem 0.5rem;
+		font-size: var(--font-size-lg);
+		font-weight: var(--font-weight-bold);
+		padding: var(--spacing-xs) var(--spacing-sm);
 		width: 100%;
 		max-width: 600px;
 		font-family: inherit;
-		letter-spacing: -0.025em;
+		letter-spacing: var(--letter-spacing-tight);
+		transition: var(--transition);
 	}
 	
 	.note-title-input:focus {
 		outline: none;
 		border-color: var(--accent-hover);
-		box-shadow: 0 0 0 2px var(--accent-light);
+		box-shadow: 0 0 0 3px var(--accent-light);
+		background: var(--bg-secondary);
 	}
 
 	.note-status {
@@ -875,18 +1227,18 @@
 		height: 100%;
 		color: var(--text-secondary);
 		text-align: center;
-		padding: 2rem;
+		padding: var(--spacing-2xl);
 	}
 
 	.empty-editor p {
-		margin: 0 0 1rem 0;
-		font-size: 1.1rem;
+		margin: 0 0 var(--spacing-lg) 0;
+		font-size: var(--font-size-lg);
 	}
 
 	.empty-editor p:first-child {
 		color: var(--text-primary);
-		font-weight: 600;
-		margin-bottom: 0.5rem;
+		font-weight: var(--font-weight-semibold);
+		margin-bottom: var(--spacing-sm);
 	}
 
 	.sidebar-overlay {
@@ -941,16 +1293,16 @@
 		}
 
 		.toolbar {
-			padding: 0.75rem 1rem;
+			padding: var(--spacing-md) var(--spacing-lg);
 		}
 
 		.toolbar-right {
-			gap: 0.5rem;
+			gap: var(--spacing-sm);
 		}
 
 		.note-status {
-			gap: 0.5rem;
-			font-size: 0.75rem;
+			gap: var(--spacing-sm);
+			font-size: var(--font-size-xs);
 		}
 
 		.status-updated span {
@@ -958,7 +1310,7 @@
 		}
 
 		.note-title {
-			font-size: 1rem;
+			font-size: var(--font-size-base);
 		}
 	}
 
@@ -969,12 +1321,12 @@
 		}
 
 		.toolbar {
-			padding: 0.625rem 0.75rem;
+			padding: var(--spacing-sm) var(--spacing-md);
 		}
 
 		.toolbar-left,
 		.toolbar-right {
-			gap: 0.5rem;
+			gap: var(--spacing-sm);
 		}
 
 		.note-status {
@@ -988,24 +1340,39 @@
 		left: 0;
 		right: 0;
 		bottom: 0;
-		background: rgba(0, 0, 0, 0.7);
+		background: rgba(0, 0, 0, 0.75);
+		backdrop-filter: blur(4px);
+		-webkit-backdrop-filter: blur(4px);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		z-index: 1000;
+		animation: fadeIn 0.2s ease;
 	}
 
 	.dialog {
 		background: var(--bg-secondary);
 		border: 1px solid var(--border-color);
-		border-radius: var(--radius);
+		border-radius: var(--radius-lg);
 		padding: 0;
 		min-width: 300px;
 		max-width: 90vw;
-		box-shadow: var(--shadow-lg);
+		box-shadow: var(--shadow-xl);
 		display: flex;
 		flex-direction: column;
 		max-height: 90vh;
+		animation: slideUpScale 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	}
+
+	@keyframes slideUpScale {
+		from {
+			opacity: 0;
+			transform: scale(0.95) translateY(1rem);
+		}
+		to {
+			opacity: 1;
+			transform: scale(1) translateY(0);
+		}
 	}
 
 	.export-password-dialog {
@@ -1014,7 +1381,7 @@
 	}
 
 	.dialog-header {
-		padding: 1.25rem 1.5rem;
+		padding: var(--spacing-xl) var(--spacing-2xl);
 		border-bottom: 1px solid var(--border-color);
 		display: flex;
 		justify-content: space-between;
@@ -1023,12 +1390,12 @@
 
 	.dialog-header h3 {
 		margin: 0;
-		font-size: 1.1rem;
+		font-size: var(--font-size-lg);
 		color: var(--text-primary);
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-weight: 600;
+		gap: var(--spacing-sm);
+		font-weight: var(--font-weight-semibold);
 	}
 
 	.close-btn {
@@ -1037,8 +1404,8 @@
 		color: var(--text-secondary);
 		font-size: 1.5rem;
 		cursor: pointer;
-		padding: 0.25rem;
-		border-radius: var(--radius-sm);
+		padding: var(--spacing-xs);
+		border-radius: var(--radius);
 		transition: var(--transition);
 		line-height: 1;
 		width: 2rem;
@@ -1051,46 +1418,51 @@
 	.close-btn:hover {
 		background: var(--bg-tertiary);
 		color: var(--text-primary);
+		transform: scale(1.1);
+	}
+
+	.close-btn:active {
+		transform: scale(0.95);
 	}
 
 	.dialog-body {
-		padding: 1.5rem;
+		padding: var(--spacing-2xl);
 		overflow-y: auto;
 		flex: 1;
 		min-height: 0;
 	}
 
 	.dialog-description {
-		margin: 0 0 1rem 0;
+		margin: 0 0 var(--spacing-lg) 0;
 		color: var(--text-secondary);
-		font-size: 0.9rem;
-		line-height: 1.5;
-	}
-
-	.dialog-hints {
-		margin: 0 0 1.5rem 0;
-		padding-left: 1.25rem;
-		color: var(--text-secondary);
-		font-size: 0.85rem;
+		font-size: var(--font-size-sm);
 		line-height: 1.6;
 	}
 
+	.dialog-hints {
+		margin: 0 0 var(--spacing-2xl) 0;
+		padding-left: var(--spacing-xl);
+		color: var(--text-secondary);
+		font-size: var(--font-size-sm);
+		line-height: 1.7;
+	}
+
 	.dialog-hints li {
-		margin-bottom: 0.25rem;
+		margin-bottom: var(--spacing-xs);
 	}
 
 	.password-input-wrapper {
-		margin-top: 1rem;
+		margin-top: var(--spacing-lg);
 	}
 
 	.password-input {
 		width: 100%;
-		padding: 0.75rem;
+		padding: var(--spacing-md);
 		border: 1px solid var(--border-color);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		background: var(--input-bg);
 		color: var(--text-primary);
-		font-size: 0.9rem;
+		font-size: var(--font-size-sm);
 		transition: var(--transition);
 		font-family: inherit;
 	}
@@ -1098,7 +1470,8 @@
 	.password-input:focus {
 		outline: none;
 		border-color: var(--accent-color);
-		box-shadow: 0 0 0 2px var(--accent-light);
+		box-shadow: 0 0 0 3px var(--accent-light);
+		background: var(--bg-tertiary);
 	}
 
 	.password-input.error {
@@ -1111,57 +1484,58 @@
 	}
 
 	.error-text {
-		margin-top: 0.5rem;
+		margin-top: var(--spacing-sm);
 		color: var(--error-color);
-		font-size: 0.85rem;
+		font-size: var(--font-size-sm);
 		display: flex;
 		align-items: center;
-		gap: 0.25rem;
+		gap: var(--spacing-xs);
+		font-weight: var(--font-weight-medium);
 	}
 
 	.result-message {
 		color: var(--text-primary);
-		font-size: 0.9rem;
-		line-height: 1.6;
+		font-size: var(--font-size-sm);
+		line-height: 1.7;
 		white-space: pre-line;
-		padding: 1rem;
+		padding: var(--spacing-lg);
 		background: var(--bg-tertiary);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		border: 1px solid var(--border-color);
 	}
 
 	.result-message.error {
 		color: var(--error-color);
 		background: rgba(239, 68, 68, 0.1);
-		border-color: var(--error-color);
+		border-color: rgba(239, 68, 68, 0.3);
 	}
 
 	.color-selector-section {
-		margin-bottom: 1rem;
+		margin-bottom: var(--spacing-lg);
 	}
 
 	.color-selector-label {
 		display: block;
-		font-size: 0.85rem;
-		font-weight: 500;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
 		color: var(--text-secondary);
-		margin-bottom: 0.5rem;
+		margin-bottom: var(--spacing-sm);
 	}
 
 	.color-selector {
 		display: grid;
 		grid-template-columns: repeat(6, 1fr);
-		gap: 0.5rem;
-		padding: 0.5rem;
+		gap: var(--spacing-sm);
+		padding: var(--spacing-sm);
 		background: var(--bg-tertiary);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		border: 1px solid var(--border-color);
 	}
 
 	.color-option {
 		aspect-ratio: 1;
 		border: 2px solid var(--border-color);
-		border-radius: var(--radius-sm);
+		border-radius: var(--radius);
 		cursor: pointer;
 		transition: var(--transition);
 		display: flex;
@@ -1174,12 +1548,14 @@
 	.color-option:hover {
 		transform: scale(1.1);
 		border-color: var(--accent-color);
+		box-shadow: var(--shadow-sm);
 	}
 
 	.color-option.selected {
 		border-color: var(--accent-color);
 		border-width: 3px;
-		box-shadow: 0 0 0 2px var(--accent-light);
+		box-shadow: 0 0 0 3px var(--accent-light), var(--shadow-sm);
+		transform: scale(1.05);
 	}
 
 	.color-option:first-child {
@@ -1189,31 +1565,42 @@
 
 	.dialog-actions {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--spacing-sm);
 		justify-content: flex-end;
-		padding: 1rem 1.5rem;
+		padding: var(--spacing-lg) var(--spacing-2xl);
 		border-top: 1px solid var(--border-color);
 		flex-shrink: 0;
 	}
 
 	.btn-primary,
 	.btn-secondary {
-		padding: 0.5rem 1rem;
-		border-radius: var(--radius-sm);
-		font-size: 0.85rem;
+		padding: var(--spacing-sm) var(--spacing-lg);
+		border-radius: var(--radius);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
 		cursor: pointer;
 		border: 1px solid var(--border-color);
 		transition: var(--transition);
+		position: relative;
+		overflow: hidden;
 	}
 
 	.btn-primary {
 		background: var(--accent-color);
 		color: white;
 		border-color: var(--accent-color);
+		box-shadow: var(--shadow-xs);
 	}
 
 	.btn-primary:hover {
 		background: var(--accent-hover);
+		box-shadow: var(--shadow-sm);
+		transform: translateY(-1px);
+	}
+
+	.btn-primary:active {
+		transform: translateY(0);
+		box-shadow: var(--shadow-xs);
 	}
 
 	.btn-secondary {
@@ -1224,25 +1611,46 @@
 	.btn-secondary:hover {
 		background: var(--bg-secondary);
 		color: var(--text-primary);
+		border-color: var(--border-hover);
+		transform: translateY(-1px);
+	}
+
+	.btn-secondary:active {
+		transform: translateY(0);
 	}
 
 	.floating-toolbar {
 		position: absolute;
-		bottom: 2rem;
+		bottom: var(--spacing-2xl);
 		left: 50%;
 		transform: translateX(-50%);
 		display: flex;
-		gap: 1rem;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius);
-		padding: 0.75rem 1rem;
+		gap: var(--spacing-lg);
+		background: var(--glass-bg);
+		backdrop-filter: var(--glass-blur);
+		-webkit-backdrop-filter: var(--glass-blur);
+		border: 1px solid var(--glass-border);
+		border-radius: var(--radius-lg);
+		padding: var(--spacing-md) var(--spacing-xl);
 		box-shadow: var(--shadow-lg);
 		z-index: 1000;
 		align-items: center;
 		min-width: 400px;
 		justify-content: space-between;
 		overflow: visible;
+		transition: var(--transition);
+		animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	}
+
+	@keyframes slideUp {
+		from {
+			opacity: 0;
+			transform: translateX(-50%) translateY(1rem);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(-50%) translateY(0);
+		}
 	}
 
 	.toolbar-left {
@@ -1269,26 +1677,34 @@
 	.toolbar-info {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		font-size: 0.85rem;
+		gap: var(--spacing-xs);
+		font-size: var(--font-size-sm);
 		color: var(--text-muted);
-		padding: 0.25rem 0.5rem;
-		border-radius: var(--radius-sm);
-		background: var(--bg-tertiary);
+		padding: var(--spacing-xs) var(--spacing-sm);
+		border-radius: var(--radius);
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		font-weight: var(--font-weight-medium);
+		backdrop-filter: blur(4px);
 	}
 
 	.toolbar-info.encrypted {
 		color: var(--accent-color);
+		background: rgba(91, 141, 239, 0.15);
+		border-color: rgba(91, 141, 239, 0.2);
 	}
 
 	.toolbar-info.save-status {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		font-size: 0.85rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: var(--radius-sm);
-		background: var(--bg-tertiary);
+		gap: var(--spacing-xs);
+		font-size: var(--font-size-sm);
+		padding: var(--spacing-xs) var(--spacing-sm);
+		border-radius: var(--radius);
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.05);
+		font-weight: var(--font-weight-medium);
+		backdrop-filter: blur(4px);
 	}
 
 	.toolbar-info.save-status.saving {
@@ -1297,10 +1713,14 @@
 
 	.toolbar-info.save-status.saved {
 		color: var(--success-color);
+		background: rgba(74, 222, 128, 0.15);
+		border-color: rgba(74, 222, 128, 0.2);
 	}
 
 	.toolbar-info.save-status.error {
 		color: var(--error-color);
+		background: rgba(239, 68, 68, 0.15);
+		border-color: rgba(239, 68, 68, 0.2);
 	}
 
 	.toolbar-info span {
@@ -1312,34 +1732,64 @@
 		border: none;
 		color: var(--text-muted);
 		cursor: pointer;
-		padding: 0.5rem;
-		border-radius: var(--radius-sm);
+		padding: var(--spacing-sm);
+		border-radius: var(--radius);
 		transition: var(--transition);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		width: 2.5rem;
 		height: 2.5rem;
+		position: relative;
+	}
+
+	.toolbar-btn::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border-radius: var(--radius);
+		background: var(--bg-tertiary);
+		opacity: 0;
+		transition: var(--transition-fast);
+	}
+
+	.toolbar-btn:hover:not(:disabled)::before {
+		opacity: 1;
 	}
 
 	.toolbar-btn:hover:not(:disabled) {
-		background: var(--bg-tertiary);
 		color: var(--text-primary);
-		transform: scale(1.1);
+		transform: translateY(-2px);
+	}
+
+	.toolbar-btn:active:not(:disabled) {
+		transform: translateY(0);
 	}
 
 	.toolbar-btn.active {
 		color: var(--accent-color);
+	}
+
+	.toolbar-btn.active::before {
 		background: var(--accent-light);
+		opacity: 1;
+	}
+
+	.toolbar-btn.delete:hover:not(:disabled)::before {
+		background: var(--error-color);
 	}
 
 	.toolbar-btn.delete:hover:not(:disabled) {
-		background: var(--error-color);
 		color: white;
 	}
 
+	.toolbar-btn :global(.icon) {
+		position: relative;
+		z-index: 1;
+	}
+
 	.toolbar-btn:disabled {
-		opacity: 0.5;
+		opacity: 0.4;
 		cursor: not-allowed;
 		transform: none;
 	}

@@ -67,7 +67,8 @@
 		Menu,
 		CheckCircle,
 		Check,
-		Loader2
+		Loader2,
+		Search
 	} from 'lucide-svelte';
 
 	// Mapping delle icone più comuni che useremo nell'app
@@ -96,6 +97,7 @@
 		edit: Edit,
 		eye: Eye,
 		hardDrive: HardDrive,
+		search: Search,
 
 		// Editor toolbar
 		bold: Bold,

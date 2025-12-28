@@ -18,6 +18,8 @@ export class Note {
 		this.encrypted = data.encrypted !== undefined ? data.encrypted : false; // Default to false for new notes
 		this.favorite = data.favorite !== undefined ? data.favorite : false; // Default to false for new notes
 		this.color = data.color || null; // Color for note (hex color code or null)
+		this.mode = data.mode || 'text'; // Note mode: 'text' or 'whiteboard'
+		this.whiteboardData = data.whiteboardData || null; // Whiteboard data (JSON string or object)
 		this.fileHandle = data.fileHandle || null;
 		this.ciphertext = data.ciphertext || null;
 		this.nonce = data.nonce || null;
@@ -85,6 +87,8 @@ export class Note {
 			encrypted: this.encrypted,
 			favorite: this.favorite,
 			color: this.color, // Store note color
+			mode: this.mode, // Store note mode
+			whiteboardData: this.whiteboardData, // Store whiteboard data
 			ciphertext: this.ciphertext, // Store encrypted content
 			nonce: this.nonce, // Store encryption nonce
 			contentLength: this.content.length

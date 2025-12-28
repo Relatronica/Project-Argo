@@ -6,13 +6,13 @@
 	import { oneDark } from '@codemirror/theme-one-dark';
 	import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 	import { currentNote, allTags } from '../stores/notesStore.js';
+	import { isDarkTheme } from '../stores/themeStore.js';
 	import TagManager from './TagManager.svelte';
 	import MarkdownViewer from './MarkdownViewer.svelte';
 	import Icon from './Icon.svelte';
 
 	let editorView;
 	let editorElement;
-	let isDark = true;
 	let showPreview = false;
 	let lastNoteId = null;
 
@@ -32,7 +32,7 @@
 			history(),
 			markdown(),
 			keymap.of([...defaultKeymap, ...historyKeymap]),
-			isDark ? oneDark : [],
+			$isDarkTheme ? oneDark : [],
 			EditorView.updateListener.of((update) => {
 				if (update.docChanged && $currentNote) {
 					// Update note content on change
@@ -89,7 +89,7 @@
 		}, 2000);
 	}
 
-	$: if (isDark !== undefined && editorView) {
+	$: if ($isDarkTheme !== undefined && editorView) {
 		// Theme changed - recreate editor
 		initEditor();
 	}
@@ -109,17 +109,11 @@
 		}
 	});
 
-	function toggleTheme() {
-		isDark = !isDark;
-	}
 </script>
 
 <div class="editor-container">
 	<div class="editor-toolbar">
 		<div class="toolbar-left">
-			<button class="theme-toggle" on:click={toggleTheme}>
-				<Icon name={isDark ? 'sun' : 'moon'} size={16} />
-			</button>
 			{#if $currentNote}
 				<button
 					class="preview-toggle"

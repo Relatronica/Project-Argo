@@ -11,21 +11,36 @@
 	import { TextAlign } from '@tiptap/extension-text-align';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
-	import { currentNote, allTags } from '../stores/notesStore.js';
-	import { isDarkTheme, toggleTheme } from '../stores/themeStore.js';
+	import { currentNote, saveCurrentNote, saveStatus } from '../stores/notesStore.js';
+	import { isDarkTheme } from '../stores/themeStore.js';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
-	import TagManager from './TagManager.svelte';
 	import Icon from './Icon.svelte';
+	import Whiteboard from './Whiteboard.svelte';
+	
+	// Whiteboard state
+	let whiteboardComponent;
+	let whiteboardTool = 'pen';
+	let whiteboardColor = '#000000';
+	let whiteboardLineWidth = 2;
 
 	let editorElement;
 	let lastNoteId = null;
+	let lastMode = null;
 	let editor;
 
 	// Color picker state
 	let showColorPicker = false;
 	let colorPickerElement;
 	let customColor = '#000000';
+
+	// Link/Image modal state
+	let showLinkModal = false;
+	let showImageModal = false;
+	let linkUrl = '';
+	let imageUrl = '';
+	let linkModalElement;
+	let imageModalElement;
 
 	// Table detection state
 	let isInTableState = false;
@@ -115,18 +130,42 @@ import TurndownService from 'turndown';
 	}
 
 	$: if ($currentNote && editorElement) {
-		// Note changed - update editor
-		if (lastNoteId !== $currentNote.id) {
+		// Ensure mode is set
+		if (!$currentNote.mode) {
+			$currentNote.mode = 'text';
+		}
+		
+		const currentMode = $currentNote.mode;
+		const noteChanged = lastNoteId !== $currentNote.id;
+		const modeChanged = lastMode !== currentMode;
+		
+		// If note or mode changed, we need to reinitialize the editor
+		if (noteChanged || modeChanged) {
 			lastNoteId = $currentNote.id;
+			lastMode = currentMode;
+			
 			if (editor) {
-				const preparedContent = prepareContentForEditor($currentNote.content);
-				const currentContent = editor.getHTML();
-				if (currentContent !== preparedContent) {
-					editor.commands.setContent(preparedContent);
-				}
-			} else {
-				initEditor();
+				// Destroy existing editor before creating new one
+				editor.destroy();
+				editor = null;
 			}
+			
+			// Small delay to ensure DOM is ready
+			setTimeout(() => {
+				if (editorElement && $currentNote) {
+					initEditor();
+				}
+			}, 0);
+		} else if (editor) {
+			// Just update content if note changed but mode didn't
+			const preparedContent = prepareContentForEditor($currentNote.content);
+			const currentContent = editor.getHTML();
+			if (currentContent !== preparedContent) {
+				editor.commands.setContent(preparedContent);
+			}
+		} else {
+			// Initialize editor if it doesn't exist
+			initEditor();
 		}
 	}
 
@@ -146,8 +185,10 @@ import TurndownService from 'turndown';
 		}, 2000);
 	}
 
-	$: if (editor) {
+	let lastTheme = $isDarkTheme;
+	$: if (editor && lastTheme !== $isDarkTheme) {
 		// Theme changed - recreate editor
+		lastTheme = $isDarkTheme;
 		initEditor();
 	}
 
@@ -169,10 +210,6 @@ import TurndownService from 'turndown';
 		// Remove click outside listener
 		document.removeEventListener('click', handleClickOutside);
 	});
-
-	function handleToggleTheme() {
-		toggleTheme();
-	}
 
 	// Toolbar functions
 	function toggleBold() {
@@ -208,21 +245,52 @@ import TurndownService from 'turndown';
 	}
 
 	function setLink() {
-		const url = window.prompt('Enter URL:');
-		if (url) {
-			editor?.chain().focus().setLink({ href: url }).run();
+		if (isActive('link')) {
+			unsetLink();
+		} else {
+			linkUrl = '';
+			showLinkModal = true;
 		}
 	}
 
 	function unsetLink() {
-		editor?.chain().focus().unsetLink().run();
+		if (!editor) return;
+		editor.chain().focus().unsetLink().run();
+	}
+
+	function confirmLink() {
+		if (linkUrl && linkUrl.trim()) {
+			if (editor) {
+				editor.chain().focus().setLink({ href: linkUrl.trim() }).run();
+			}
+		}
+		showLinkModal = false;
+		linkUrl = '';
+	}
+
+	function cancelLink() {
+		showLinkModal = false;
+		linkUrl = '';
 	}
 
 	function addImage() {
-		const url = window.prompt('Enter image URL:');
-		if (url) {
-			editor?.chain().focus().setImage({ src: url }).run();
+		imageUrl = '';
+		showImageModal = true;
+	}
+
+	function confirmImage() {
+		if (imageUrl && imageUrl.trim()) {
+			if (editor) {
+				editor.chain().focus().setImage({ src: imageUrl.trim() }).run();
+			}
 		}
+		showImageModal = false;
+		imageUrl = '';
+	}
+
+	function cancelImage() {
+		showImageModal = false;
+		imageUrl = '';
 	}
 
 	function addTable() {
@@ -278,9 +346,22 @@ import TurndownService from 'turndown';
 
 	// Close color picker when clicking outside
 	function handleClickOutside(event) {
-		if (showColorPicker && colorPickerElement && !colorPickerElement.contains(event.target) &&
-		    !event.target.closest('.color-picker-btn')) {
+		// Don't close if clicking on toolbar buttons
+		if (event.target.closest('.toolbar-btn')) {
+			return;
+		}
+		
+		if (showColorPicker && colorPickerElement && 
+		    !colorPickerElement.contains(event.target) &&
+		    !event.target.closest('.color-picker-btn') &&
+		    !event.target.closest('.color-picker-container')) {
 			showColorPicker = false;
+		}
+		if (showLinkModal && linkModalElement && !linkModalElement.contains(event.target)) {
+			cancelLink();
+		}
+		if (showImageModal && imageModalElement && !imageModalElement.contains(event.target)) {
+			cancelImage();
 		}
 	}
 
@@ -365,15 +446,13 @@ import TurndownService from 'turndown';
 </script>
 
 <div class="editor-container">
-	<div class="editor-toolbar">
-		<div class="toolbar-left">
-			<button class="theme-toggle" on:click={handleToggleTheme}>
-				<Icon name={$isDarkTheme ? 'sun' : 'moon'} size={16} />
-			</button>
+	{#if $currentNote?.mode !== 'whiteboard'}
+		<div class="editor-wrapper">
+			<div bind:this={editorElement} class="editor"></div>
 		</div>
-
-		{#if $currentNote}
-			<div class="toolbar-center">
+		{#if $currentNote && editor}
+			<div class="floating-toolbar">
+				<div class="toolbar-content">
 				<!-- Text formatting -->
 				<button
 					class="toolbar-btn"
@@ -470,14 +549,14 @@ import TurndownService from 'turndown';
 				<button
 					class="toolbar-btn"
 					class:active={isActive('link')}
-					on:click={isActive('link') ? unsetLink : setLink}
-					title="Link"
+					on:click|stopPropagation={setLink}
+					title={isActive('link') ? 'Remove Link' : 'Insert Link'}
 				>
 					<Icon name="link" size={16} />
 				</button>
 				<button
 					class="toolbar-btn"
-					on:click={addImage}
+					on:click|stopPropagation={addImage}
 					title="Insert Image"
 				>
 					<Icon name="image" size={16} />
@@ -534,7 +613,7 @@ import TurndownService from 'turndown';
 				<div class="color-picker-container">
 					<button
 						class="toolbar-btn color-picker-btn"
-						on:click={toggleColorPicker}
+						on:click|stopPropagation={toggleColorPicker}
 						title="Text Color"
 					>
 						<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
@@ -542,7 +621,7 @@ import TurndownService from 'turndown';
 					</button>
 
 					{#if showColorPicker}
-						<div class="color-picker-dropdown" bind:this={colorPickerElement}>
+						<div class="color-picker-dropdown" bind:this={colorPickerElement} on:click|stopPropagation>
 							<div class="color-palette">
 								{#each colorPalette as color}
 									<button
@@ -572,27 +651,370 @@ import TurndownService from 'turndown';
 						</div>
 					{/if}
 				</div>
+				</div>
 			</div>
 		{/if}
+	{/if}
 
-		{#if $currentNote}
-			<div class="toolbar-right">
-				<TagManager
-					tags={$currentNote.tags}
-					availableTags={$allTags}
-					on:change={(e) => {
-						if ($currentNote) {
-							$currentNote.tags = e.detail.tags;
-						}
-					}}
+	{#if $currentNote?.mode === 'whiteboard'}
+		<div class="whiteboard-layout">
+			<div class="editor-section">
+				<div class="editor-wrapper">
+					<div bind:this={editorElement} class="editor"></div>
+				</div>
+				{#if $currentNote && editor}
+					<div class="floating-toolbar">
+						<div class="toolbar-content">
+							<!-- Text formatting -->
+							<button
+								class="toolbar-btn"
+								class:active={isActive('bold')}
+								on:click={toggleBold}
+								title="Bold"
+							>
+								<Icon name="bold" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('italic')}
+								on:click={toggleItalic}
+								title="Italic"
+							>
+								<Icon name="italic" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('strike')}
+								on:click={toggleStrike}
+								title="Strikethrough"
+							>
+								<Icon name="strikethrough" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('code')}
+								on:click={toggleCode}
+								title="Code"
+							>
+								<Icon name="code" size={16} />
+							</button>
+
+							<div class="toolbar-separator"></div>
+
+							<!-- Headings -->
+							<button
+								class="toolbar-btn"
+								class:active={isActive('heading', { level: 1 })}
+								on:click={() => setHeading(1)}
+								title="Heading 1"
+							>
+								H1
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('heading', { level: 2 })}
+								on:click={() => setHeading(2)}
+								title="Heading 2"
+							>
+								H2
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('heading', { level: 3 })}
+								on:click={() => setHeading(3)}
+								title="Heading 3"
+							>
+								H3
+							</button>
+
+							<div class="toolbar-separator"></div>
+
+							<!-- Lists -->
+							<button
+								class="toolbar-btn"
+								class:active={isActive('bulletList')}
+								on:click={toggleBulletList}
+								title="Bullet List"
+							>
+								<Icon name="list" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('orderedList')}
+								on:click={toggleOrderedList}
+								title="Numbered List"
+							>
+								<Icon name="list-ordered" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive('blockquote')}
+								on:click={toggleBlockquote}
+								title="Quote"
+							>
+								<Icon name="quote" size={16} />
+							</button>
+
+							<div class="toolbar-separator"></div>
+
+							<!-- Links and Images -->
+							<button
+								class="toolbar-btn"
+								class:active={isActive('link')}
+								on:click|stopPropagation={setLink}
+								title={isActive('link') ? 'Remove Link' : 'Insert Link'}
+							>
+								<Icon name="link" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								on:click|stopPropagation={addImage}
+								title="Insert Image"
+							>
+								<Icon name="image" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								on:click={addTable}
+								title="Insert Table"
+							>
+								<Icon name="table" size={16} />
+							</button>
+
+							{#if isInTableState}
+								<button
+									class="toolbar-btn color-reset-btn"
+									on:click={deleteTable}
+									title="Delete Table"
+								>
+									<Icon name="trash" size={16} />
+								</button>
+							{/if}
+
+							<div class="toolbar-separator"></div>
+
+							<!-- Text alignment -->
+							<button
+								class="toolbar-btn"
+								class:active={isActive({ textAlign: 'left' })}
+								on:click={() => setTextAlign('left')}
+								title="Align Left"
+							>
+								<Icon name="align-left" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive({ textAlign: 'center' })}
+								on:click={() => setTextAlign('center')}
+								title="Align Center"
+							>
+								<Icon name="align-center" size={16} />
+							</button>
+							<button
+								class="toolbar-btn"
+								class:active={isActive({ textAlign: 'right' })}
+								on:click={() => setTextAlign('right')}
+								title="Align Right"
+							>
+								<Icon name="align-right" size={16} />
+							</button>
+
+							<div class="toolbar-separator"></div>
+
+							<!-- Text Color -->
+							<div class="color-picker-container">
+								<button
+									class="toolbar-btn color-picker-btn"
+									on:click={toggleColorPicker}
+									title="Text Color"
+								>
+									<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
+									<Icon name="palette" size={16} />
+								</button>
+
+								{#if showColorPicker}
+									<div class="color-picker-dropdown" bind:this={colorPickerElement}>
+										<div class="color-palette">
+											{#each colorPalette as color}
+												<button
+													class="color-option"
+													style="background-color: {color}"
+													on:click={() => applyColor(color)}
+													title={color}
+												></button>
+											{/each}
+										</div>
+										<div class="color-controls">
+											<input
+												type="color"
+												bind:value={customColor}
+												on:input={applyCustomColor}
+												class="custom-color-input"
+												title="Custom Color"
+											/>
+											<button
+												class="color-reset-btn"
+												on:click={resetColor}
+												title="Reset to default"
+											>
+												<Icon name="x" size={14} />
+											</button>
+										</div>
+									</div>
+								{/if}
+							</div>
+							
+							{#if $currentNote?.mode === 'whiteboard'}
+								<div class="toolbar-separator"></div>
+								
+								<!-- Whiteboard Tools -->
+								<button
+									class="toolbar-btn"
+									class:active={whiteboardTool === 'pen'}
+									on:click={() => {
+										whiteboardTool = 'pen';
+										if (whiteboardComponent) whiteboardComponent.setTool('pen');
+									}}
+									title="Pen"
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+										<path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+										<path d="M2 2l7.586 7.586"></path>
+										<circle cx="11" cy="11" r="2"></circle>
+									</svg>
+								</button>
+								<button
+									class="toolbar-btn"
+									class:active={whiteboardTool === 'eraser'}
+									on:click={() => {
+										whiteboardTool = 'eraser';
+										if (whiteboardComponent) whiteboardComponent.setTool('eraser');
+									}}
+									title="Eraser"
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"></path>
+									</svg>
+								</button>
+								
+								<div class="toolbar-separator"></div>
+								
+								<!-- Whiteboard Color -->
+								<input 
+									type="color" 
+									bind:value={whiteboardColor}
+									on:change={() => {
+										if (whiteboardComponent) whiteboardComponent.setColor(whiteboardColor);
+									}}
+									class="whiteboard-color-input"
+									title="Whiteboard Color"
+								/>
+								
+								<!-- Whiteboard Line Width -->
+								<div class="whiteboard-width-control">
+									<input 
+										type="range" 
+										min="1" 
+										max="20" 
+										bind:value={whiteboardLineWidth}
+										on:input={() => {
+											if (whiteboardComponent) whiteboardComponent.setLineWidth(whiteboardLineWidth);
+										}}
+										class="whiteboard-width-input"
+										title="Line Width"
+									/>
+									<span class="whiteboard-width-label">{whiteboardLineWidth}px</span>
+								</div>
+								
+								<div class="toolbar-separator"></div>
+								
+								<!-- Clear Whiteboard -->
+								<button
+									class="toolbar-btn"
+									on:click={() => {
+										if (whiteboardComponent && confirm('Clear the entire whiteboard?')) {
+											whiteboardComponent.clearCanvas();
+										}
+									}}
+									title="Clear Whiteboard"
+								>
+									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M3 6h18"></path>
+										<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+										<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+									</svg>
+								</button>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
+			<div class="whiteboard-section">
+				<Whiteboard 
+					bind:this={whiteboardComponent}
+					bind:currentTool={whiteboardTool}
+					bind:currentColor={whiteboardColor}
+					bind:lineWidth={whiteboardLineWidth}
 				/>
 			</div>
-		{/if}
-	</div>
-	<div class="editor-wrapper">
-		<div bind:this={editorElement} class="editor"></div>
-	</div>
+		</div>
+	{/if}
 </div>
+
+<!-- Link Modal -->
+{#if showLinkModal}
+	<div class="modal-overlay" on:click={cancelLink}>
+		<div class="modal-content" bind:this={linkModalElement} on:click|stopPropagation>
+			<h3>Insert Link</h3>
+			<input
+				type="text"
+				class="modal-input"
+				placeholder="Enter URL..."
+				bind:value={linkUrl}
+				on:keydown={(e) => {
+					if (e.key === 'Enter') {
+						confirmLink();
+					} else if (e.key === 'Escape') {
+						cancelLink();
+					}
+				}}
+				autofocus
+			/>
+			<div class="modal-actions">
+				<button class="modal-btn cancel" on:click={cancelLink}>Cancel</button>
+				<button class="modal-btn confirm" on:click={confirmLink}>Insert</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Image Modal -->
+{#if showImageModal}
+	<div class="modal-overlay" on:click={cancelImage}>
+		<div class="modal-content" bind:this={imageModalElement} on:click|stopPropagation>
+			<h3>Insert Image</h3>
+			<input
+				type="text"
+				class="modal-input"
+				placeholder="Enter image URL..."
+				bind:value={imageUrl}
+				on:keydown={(e) => {
+					if (e.key === 'Enter') {
+						confirmImage();
+					} else if (e.key === 'Escape') {
+						cancelImage();
+					}
+				}}
+				autofocus
+			/>
+			<div class="modal-actions">
+				<button class="modal-btn cancel" on:click={cancelImage}>Cancel</button>
+				<button class="modal-btn confirm" on:click={confirmImage}>Insert</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.editor-container {
@@ -600,16 +1022,59 @@ import TurndownService from 'turndown';
 		flex-direction: column;
 		height: 100%;
 		width: 100%;
+		overflow: hidden;
+		position: relative;
 	}
 
-	.editor-toolbar {
+	.floating-toolbar {
+		position: absolute;
+		bottom: 1.5rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 100;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
 		padding: 0.5rem;
-		border-bottom: 1px solid var(--border-color, #333);
 		display: flex;
-		justify-content: space-between;
 		align-items: center;
-		flex-wrap: wrap;
 		gap: 0.5rem;
+		max-width: calc(100% - 3rem);
+		overflow: visible;
+	}
+
+	.floating-toolbar .toolbar-content {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: nowrap;
+	}
+	
+	.whiteboard-color-input {
+		width: 32px;
+		height: 32px;
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		padding: 0;
+		background: transparent;
+	}
+	
+	.whiteboard-width-control {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	
+	.whiteboard-width-input {
+		width: 60px;
+	}
+	
+	.whiteboard-width-label {
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		min-width: 35px;
 	}
 
 	.toolbar-left {
@@ -688,9 +1153,8 @@ import TurndownService from 'turndown';
 
 	.color-picker-dropdown {
 		position: absolute;
-		top: 100%;
+		bottom: calc(100% + 0.5rem);
 		right: 0;
-		margin-top: 0.25rem;
 		background: var(--bg-secondary);
 		border: 1px solid var(--border-color);
 		border-radius: var(--radius);
@@ -788,7 +1252,72 @@ import TurndownService from 'turndown';
 
 	.editor-wrapper {
 		flex: 1;
+		display: flex;
+		flex-direction: column;
 		overflow: auto;
+		padding-bottom: 4rem;
+	}
+	
+	.whiteboard-layout {
+		display: flex;
+		flex-direction: row;
+		height: 100%;
+		width: 100%;
+		gap: 1px;
+		background: var(--border-color);
+		flex: 1;
+		overflow: hidden;
+	}
+	
+	.editor-section {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		background: var(--bg-primary);
+		overflow: hidden;
+		min-height: 0;
+	}
+	
+	
+	.whiteboard-section {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		background: var(--bg-primary);
+		overflow: hidden;
+	}
+	
+	.mode-toggle-btn {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: var(--bg-tertiary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-sm);
+		color: var(--text-secondary);
+		cursor: pointer;
+		transition: var(--transition);
+		font-size: 0.85rem;
+		font-weight: 500;
+	}
+	
+	.mode-toggle-btn:hover {
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+		border-color: var(--border-hover);
+	}
+	
+	.mode-toggle-btn.active {
+		background: var(--accent-light);
+		color: var(--accent-color);
+		border-color: var(--accent-color);
+	}
+	
+	.mode-toggle-btn svg {
+		flex-shrink: 0;
 	}
 
 	.editor {
@@ -1017,6 +1546,93 @@ import TurndownService from 'turndown';
 		color: #111827;
 	}
 
+	/* Modal Styles */
+	.modal-overlay {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.7);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 10000;
+		backdrop-filter: blur(2px);
+	}
+
+	.modal-content {
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius-lg);
+		padding: 1.5rem;
+		min-width: 400px;
+		max-width: 90vw;
+		box-shadow: var(--shadow-lg);
+	}
+
+	.modal-content h3 {
+		margin: 0 0 1rem 0;
+		font-size: 1.125rem;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.modal-input {
+		width: 100%;
+		padding: 0.75rem;
+		background: var(--input-bg);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		font-size: 0.9375rem;
+		margin-bottom: 1rem;
+		transition: var(--transition);
+		box-sizing: border-box;
+	}
+
+	.modal-input:focus {
+		outline: none;
+		border-color: var(--accent-color);
+		box-shadow: 0 0 0 2px var(--accent-light);
+	}
+
+	.modal-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+	}
+
+	.modal-btn {
+		padding: 0.5rem 1rem;
+		border-radius: var(--radius);
+		font-size: 0.9375rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: var(--transition);
+		border: 1px solid var(--border-color);
+	}
+
+	.modal-btn.cancel {
+		background: var(--bg-tertiary);
+		color: var(--text-secondary);
+	}
+
+	.modal-btn.cancel:hover {
+		background: var(--bg-secondary);
+		color: var(--text-primary);
+	}
+
+	.modal-btn.confirm {
+		background: var(--accent-color);
+		color: white;
+		border-color: var(--accent-color);
+	}
+
+	.modal-btn.confirm:hover {
+		background: var(--accent-hover);
+		border-color: var(--accent-hover);
+	}
 
 	/* List improvements */
 	:global(.editor-content.dark ul),

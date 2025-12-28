@@ -8,6 +8,7 @@
 	export let togglingFavoriteId = null;
 	export let deletingNoteId = null;
 	export let compactView = false;
+	export let isSearchMatch = false;
 	export let onSelectNote;
 	export let onToggleFavorite;
 	export let onMoveNote;
@@ -15,6 +16,7 @@
 	
 	let showColorDialog = false;
 	let selectedColor = note.color || null;
+	let isDragging = false;
 	
 	// Available colors for notes
 	const noteColors = [
@@ -44,6 +46,28 @@
 	}
 
 	$: item = prepareNoteItem(note, selectedId);
+	
+	function handleDragStart(event) {
+		isDragging = true;
+		event.dataTransfer.effectAllowed = 'move';
+		event.dataTransfer.setData('application/json', JSON.stringify({
+			type: 'note',
+			id: note.id,
+			folder: note.folder || ''
+		}));
+		// Create a custom drag image
+		const dragImage = event.target.cloneNode(true);
+		dragImage.style.opacity = '0.5';
+		dragImage.style.position = 'absolute';
+		dragImage.style.top = '-1000px';
+		document.body.appendChild(dragImage);
+		event.dataTransfer.setDragImage(dragImage, 0, 0);
+		setTimeout(() => document.body.removeChild(dragImage), 0);
+	}
+	
+	function handleDragEnd(event) {
+		isDragging = false;
+	}
 </script>
 
 <button
@@ -51,7 +75,12 @@
 	class:active={item.selected}
 	class:favorite={note.favorite}
 	class:compact={compactView}
-	on:click={() => onSelectNote(note)}
+	class:search-match={isSearchMatch}
+	class:dragging={isDragging}
+	draggable="true"
+	on:dragstart={handleDragStart}
+	on:dragend={handleDragEnd}
+	on:click={() => !isDragging && onSelectNote(note)}
 >
 	{#if compactView}
 		<div class="note-title-compact">
@@ -153,8 +182,8 @@
 		width: 100%;
 		padding: 0.875rem 1rem;
 		margin-bottom: 0;
-		background: var(--note-bg);
-		border: 1px solid var(--border-color);
+		background: transparent;
+		border: none;
 		border-radius: var(--radius);
 		cursor: pointer;
 		text-align: left;
@@ -172,7 +201,6 @@
 
 	.note-item:hover {
 		background: var(--note-hover);
-		border-color: var(--border-hover);
 		transform: translateY(-1px);
 		box-shadow: var(--shadow);
 	}
@@ -199,8 +227,29 @@
 
 	.note-item.active {
 		background: var(--accent-light);
-		border-color: var(--accent-color);
-		box-shadow: 0 0 0 2px var(--accent-color);
+	}
+	
+	.note-item.search-match {
+		background: var(--accent-light);
+		opacity: 1;
+	}
+	
+	.note-item.search-match:not(.active) {
+		background: var(--accent-light);
+		opacity: 0.6;
+	}
+	
+	.note-item.dragging {
+		opacity: 0.5;
+		cursor: grabbing;
+	}
+	
+	.note-item[draggable="true"] {
+		cursor: grab;
+	}
+	
+	.note-item[draggable="true"]:active {
+		cursor: grabbing;
 	}
 	
 	.note-item.favorite {

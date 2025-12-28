@@ -32,6 +32,18 @@ export const searchQuery = writable('');
 // Store for save status: 'idle' | 'saving' | 'saved' | 'error'
 export const saveStatus = writable('idle');
 
+// Helper function to check if a note matches search query
+function noteMatchesSearch(note, query) {
+	if (!query.trim()) return true;
+	const lowerQuery = query.toLowerCase();
+	const searchable = [
+		note.title || '',
+		note.tags?.join(' ') || '',
+		note.id || ''
+	].join(' ').toLowerCase();
+	return searchable.includes(lowerQuery);
+}
+
 // Derived store for filtered notes based on search
 export const filteredNotes = derived(
 	[notesMetadata, searchQuery],
@@ -41,14 +53,15 @@ export const filteredNotes = derived(
 		}
 		// Simple client-side filtering
 		const query = $searchQuery.toLowerCase();
-		return $notesMetadata.filter((note) => {
-			const searchable = [
-				note.title || '',
-				note.tags?.join(' ') || '',
-				note.id || ''
-			].join(' ').toLowerCase();
-			return searchable.includes(query);
-		});
+		return $notesMetadata.filter((note) => noteMatchesSearch(note, query));
+	}
+);
+
+// Derived store to check if a note matches the search (for highlighting)
+export const isNoteSearchMatch = derived(
+	[searchQuery],
+	([$searchQuery]) => {
+		return (note) => noteMatchesSearch(note, $searchQuery);
 	}
 );
 
