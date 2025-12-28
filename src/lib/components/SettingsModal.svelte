@@ -1,18 +1,22 @@
 <script>
 	import { organizationPreferences, toggleCompactView, setSortBy, setSortOrder, setGroupBy, toggleShowFavoritesFirst } from '../stores/organizationStore.js';
+	import { isDarkTheme, toggleTheme } from '../stores/themeStore.js';
 	import Icon from './Icon.svelte';
+	import ExportImport from './ExportImport.svelte';
 	
 	let showModal = false;
-	let activeSection = 'view'; // 'view' | 'organization'
+	let activeSection = 'appearance'; // 'appearance' | 'view' | 'organization' | 'backup'
 	
 	const settingsSections = [
+		{ id: 'appearance', label: 'Appearance', icon: 'palette' },
 		{ id: 'view', label: 'View', icon: 'list' },
-		{ id: 'organization', label: 'Organization', icon: 'settings' }
+		{ id: 'organization', label: 'Organization', icon: 'settings' },
+		{ id: 'backup', label: 'Backup', icon: 'package' }
 	];
 	
 	function openModal() {
 		showModal = true;
-		activeSection = 'view'; // Reset to first section when opening
+		activeSection = 'appearance'; // Reset to first section when opening
 	}
 	
 	function closeModal() {
@@ -68,7 +72,44 @@
 
 					<!-- Right content area -->
 					<div class="settings-content-area">
-						{#if activeSection === 'view'}
+						{#if activeSection === 'appearance'}
+							<div class="settings-panel">
+								<div class="panel-header">
+									<h4>
+										<Icon name="palette" size={20} />
+										Appearance Settings
+									</h4>
+									<p class="panel-description">Customize the look and feel of the application</p>
+								</div>
+								<div class="panel-content">
+									<div class="setting-item">
+										<div class="setting-info">
+											<label class="setting-label">Theme</label>
+											<p class="setting-description">Choose between light and dark theme</p>
+										</div>
+										<div class="theme-toggle-container">
+											<label class="toggle-switch theme-toggle-switch">
+												<input 
+													type="checkbox" 
+													checked={$isDarkTheme}
+													on:change={toggleTheme}
+												/>
+												<span class="toggle-slider"></span>
+											</label>
+											<span class="toggle-label">
+												{#if $isDarkTheme}
+													<Icon name="moon" size={16} />
+													Dark Mode
+												{:else}
+													<Icon name="sun" size={16} />
+													Light Mode
+												{/if}
+											</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						{:else if activeSection === 'view'}
 							<div class="settings-panel">
 								<div class="panel-header">
 									<h4>
@@ -220,6 +261,21 @@
 											/>
 											<span class="toggle-slider"></span>
 										</label>
+									</div>
+								</div>
+							</div>
+						{:else if activeSection === 'backup'}
+							<div class="settings-panel">
+								<div class="panel-header">
+									<h4>
+										<Icon name="package" size={20} />
+										Backup & Import
+									</h4>
+									<p class="panel-description">Export and import your notes</p>
+								</div>
+								<div class="panel-content">
+									<div class="backup-section-wrapper">
+										<ExportImport showButton={false} inline={true} />
 									</div>
 								</div>
 							</div>
@@ -465,6 +521,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--spacing-xl);
+		padding: var(--spacing-xl);
+	}
+
+	.backup-section-wrapper {
+		width: 100%;
+	}
+
+	.backup-section-wrapper :global(.export-import-btn) {
+		display: none;
 	}
 
 	.setting-item {
@@ -587,6 +652,12 @@
 		color: var(--accent-hover);
 	}
 
+	.theme-toggle-container {
+		display: flex;
+		align-items: center;
+		gap: var(--spacing-md);
+	}
+
 	.toggle-switch {
 		position: relative;
 		display: inline-block;
@@ -612,6 +683,15 @@
 		border: 1px solid var(--border-color);
 		transition: var(--transition);
 		border-radius: var(--radius-full);
+	}
+
+	.toggle-label {
+		display: flex;
+		align-items: center;
+		gap: var(--spacing-sm);
+		font-size: var(--font-size-sm);
+		color: var(--text-primary);
+		font-weight: var(--font-weight-medium);
 	}
 
 	.toggle-slider:before {

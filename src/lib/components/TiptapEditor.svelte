@@ -11,7 +11,7 @@
 	import { TextAlign } from '@tiptap/extension-text-align';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
-	import { currentNote, saveCurrentNote, saveStatus } from '../stores/notesStore.js';
+	import { currentNote, saveCurrentNote, saveStatus, updateNoteTitle } from '../stores/notesStore.js';
 	import { isDarkTheme } from '../stores/themeStore.js';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
@@ -25,6 +25,7 @@ import TurndownService from 'turndown';
 	let whiteboardLineWidth = 2;
 
 	let editorElement;
+	let editorWrapperElement;
 	let lastNoteId = null;
 	let lastMode = null;
 	let editor;
@@ -44,6 +45,16 @@ import TurndownService from 'turndown';
 
 	// Table detection state
 	let isInTableState = false;
+
+	// Bubble menu state
+	let showBubbleMenu = false;
+	let bubbleMenuPosition = { top: 0, left: 0 };
+	let bubbleMenuElement;
+
+	// Title editing state
+	let editingTitle = false;
+	let titleInput = '';
+	let titleInputElement;
 
 	// Color palette
 	const colorPalette = [
@@ -117,6 +128,8 @@ import TurndownService from 'turndown';
 			onSelectionUpdate: () => {
 				// Update table state when selection changes
 				checkTableState();
+				// Update bubble menu visibility based on selection
+				updateBubbleMenu();
 			},
 			editorProps: {
 				attributes: {
@@ -127,6 +140,32 @@ import TurndownService from 'turndown';
 
 		// Initial table state check
 		checkTableState();
+		// Initial bubble menu update
+		updateBubbleMenu();
+	}
+
+	// Title editing functions
+	$: if ($currentNote && !editingTitle) {
+		titleInput = $currentNote.title || '';
+	}
+
+	async function handleTitleBlur() {
+		if ($currentNote && titleInput.trim() !== ($currentNote.title || '')) {
+			await updateNoteTitle($currentNote.id, titleInput.trim());
+			if ($currentNote) {
+				titleInput = $currentNote.title || '';
+			}
+		}
+		editingTitle = false;
+	}
+
+	function handleTitleKeydown(event) {
+		if (event.key === 'Enter') {
+			event.target.blur();
+		} else if (event.key === 'Escape') {
+			titleInput = $currentNote.title || '';
+			editingTitle = false;
+		}
 	}
 
 	$: if ($currentNote && editorElement) {
@@ -370,6 +409,43 @@ import TurndownService from 'turndown';
 		return editor?.isActive(type, options) || false;
 	}
 
+	// Update bubble menu visibility and position
+	function updateBubbleMenu() {
+		if (!editor || !editorWrapperElement) {
+			showBubbleMenu = false;
+			return;
+		}
+
+		const { state } = editor;
+		const { selection } = state;
+		const { from, to } = selection;
+
+		// Show bubble menu only if there's a text selection (not just a cursor)
+		if (from !== to && !selection.empty) {
+			// Get the DOM coordinates of the selection
+			const { view } = editor;
+			const start = view.coordsAtPos(from);
+			const end = view.coordsAtPos(to);
+			
+			// Position the bubble menu above the selection
+			const wrapperRect = editorWrapperElement.getBoundingClientRect();
+			const middleX = (start.left + end.left) / 2;
+			
+			// Calculate position above the text line (approximately 50px above to account for menu height)
+			const menuHeight = 50; // Approximate height of the bubble menu
+			const spacing = 8; // Space between menu and text
+			
+			bubbleMenuPosition = {
+				top: start.top - wrapperRect.top - menuHeight - spacing,
+				left: middleX - wrapperRect.left
+			};
+			
+			showBubbleMenu = true;
+		} else {
+			showBubbleMenu = false;
+		}
+	}
+
 	// Check if cursor is inside a table and update state
 	function checkTableState() {
 		if (!editor) {
@@ -447,510 +523,272 @@ import TurndownService from 'turndown';
 
 <div class="editor-container">
 	{#if $currentNote?.mode !== 'whiteboard'}
-		<div class="editor-wrapper">
-			<div bind:this={editorElement} class="editor"></div>
-		</div>
-		{#if $currentNote && editor}
-			<div class="floating-toolbar">
-				<div class="toolbar-content">
-				<!-- Text formatting -->
-				<button
-					class="toolbar-btn"
-					class:active={isActive('bold')}
-					on:click={toggleBold}
-					title="Bold"
-				>
-					<Icon name="bold" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('italic')}
-					on:click={toggleItalic}
-					title="Italic"
-				>
-					<Icon name="italic" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('strike')}
-					on:click={toggleStrike}
-					title="Strikethrough"
-				>
-					<Icon name="strikethrough" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('code')}
-					on:click={toggleCode}
-					title="Code"
-				>
-					<Icon name="code" size={16} />
-				</button>
-
-				<div class="toolbar-separator"></div>
-
-				<!-- Headings -->
-				<button
-					class="toolbar-btn"
-					class:active={isActive('heading', { level: 1 })}
-					on:click={() => setHeading(1)}
-					title="Heading 1"
-				>
-					H1
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('heading', { level: 2 })}
-					on:click={() => setHeading(2)}
-					title="Heading 2"
-				>
-					H2
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('heading', { level: 3 })}
-					on:click={() => setHeading(3)}
-					title="Heading 3"
-				>
-					H3
-				</button>
-
-				<div class="toolbar-separator"></div>
-
-				<!-- Lists -->
-				<button
-					class="toolbar-btn"
-					class:active={isActive('bulletList')}
-					on:click={toggleBulletList}
-					title="Bullet List"
-				>
-					<Icon name="list" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('orderedList')}
-					on:click={toggleOrderedList}
-					title="Numbered List"
-				>
-					<Icon name="list-ordered" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive('blockquote')}
-					on:click={toggleBlockquote}
-					title="Quote"
-				>
-					<Icon name="quote" size={16} />
-				</button>
-
-				<div class="toolbar-separator"></div>
-
-				<!-- Links and Images -->
-				<button
-					class="toolbar-btn"
-					class:active={isActive('link')}
-					on:click|stopPropagation={setLink}
-					title={isActive('link') ? 'Remove Link' : 'Insert Link'}
-				>
-					<Icon name="link" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					on:click|stopPropagation={addImage}
-					title="Insert Image"
-				>
-					<Icon name="image" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					on:click={addTable}
-					title="Insert Table"
-				>
-					<Icon name="table" size={16} />
-				</button>
-
-				{#if isInTableState}
-					<button
-						class="toolbar-btn color-reset-btn"
-						on:click={deleteTable}
-						title="Delete Table"
-					>
-						<Icon name="trash" size={16} />
-					</button>
-				{/if}
-
-				<div class="toolbar-separator"></div>
-
-				<!-- Text alignment -->
-				<button
-					class="toolbar-btn"
-					class:active={isActive({ textAlign: 'left' })}
-					on:click={() => setTextAlign('left')}
-					title="Align Left"
-				>
-					<Icon name="align-left" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive({ textAlign: 'center' })}
-					on:click={() => setTextAlign('center')}
-					title="Align Center"
-				>
-					<Icon name="align-center" size={16} />
-				</button>
-				<button
-					class="toolbar-btn"
-					class:active={isActive({ textAlign: 'right' })}
-					on:click={() => setTextAlign('right')}
-					title="Align Right"
-				>
-					<Icon name="align-right" size={16} />
-				</button>
-
-				<div class="toolbar-separator"></div>
-
-				<!-- Text Color -->
-				<div class="color-picker-container">
-					<button
-						class="toolbar-btn color-picker-btn"
-						on:click|stopPropagation={toggleColorPicker}
-						title="Text Color"
-					>
-						<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
-						<Icon name="palette" size={16} />
-					</button>
-
-					{#if showColorPicker}
-						<div class="color-picker-dropdown" bind:this={colorPickerElement} on:click|stopPropagation>
-							<div class="color-palette">
-								{#each colorPalette as color}
-									<button
-										class="color-option"
-										style="background-color: {color}"
-										on:click={() => applyColor(color)}
-										title={color}
-									></button>
-								{/each}
-							</div>
-							<div class="color-controls">
-								<input
-									type="color"
-									bind:value={customColor}
-									on:input={applyCustomColor}
-									class="custom-color-input"
-									title="Custom Color"
-								/>
-								<button
-									class="color-reset-btn"
-									on:click={resetColor}
-									title="Reset to default"
-								>
-									<Icon name="x" size={14} />
-								</button>
-							</div>
-						</div>
+		<div class="editor-wrapper" bind:this={editorWrapperElement}>
+			<!-- Note Title Field -->
+			{#if $currentNote}
+				<div class="editor-title-section">
+					{#if editingTitle}
+						<input
+							type="text"
+							class="editor-title-input"
+							bind:this={titleInputElement}
+							bind:value={titleInput}
+							on:blur={handleTitleBlur}
+							on:keydown={handleTitleKeydown}
+							placeholder="Note title..."
+							autofocus
+						/>
+					{:else}
+						<h1 
+							class="editor-title" 
+							class:empty={!$currentNote.title}
+							on:click={() => {
+								editingTitle = true;
+								titleInput = $currentNote.title || '';
+							}}
+							title="Click to edit title"
+						>
+							{$currentNote.title || 'Untitled Note'}
+						</h1>
 					{/if}
 				</div>
+			{/if}
+			<div bind:this={editorElement} class="editor"></div>
+			{#if $currentNote && editor && showBubbleMenu}
+				<div 
+					class="bubble-menu" 
+					bind:this={bubbleMenuElement}
+					style="top: {bubbleMenuPosition.top}px; left: {bubbleMenuPosition.left}px; transform: translateX(-50%);"
+				>
+					<div class="toolbar-content">
+					<!-- Text formatting -->
+					<button
+						class="toolbar-btn"
+						class:active={isActive('bold')}
+						on:click={toggleBold}
+						title="Bold"
+					>
+						<Icon name="bold" size={16} />
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('italic')}
+						on:click={toggleItalic}
+						title="Italic"
+					>
+						<Icon name="italic" size={16} />
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('strike')}
+						on:click={toggleStrike}
+						title="Strikethrough"
+					>
+						<Icon name="strikethrough" size={16} />
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('code')}
+						on:click={toggleCode}
+						title="Code"
+					>
+						<Icon name="code" size={16} />
+					</button>
+
+					<div class="toolbar-separator"></div>
+
+					<!-- Headings -->
+					<button
+						class="toolbar-btn"
+						class:active={isActive('heading', { level: 1 })}
+						on:click={() => setHeading(1)}
+						title="Heading 1"
+					>
+						H1
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('heading', { level: 2 })}
+						on:click={() => setHeading(2)}
+						title="Heading 2"
+					>
+						H2
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('heading', { level: 3 })}
+						on:click={() => setHeading(3)}
+						title="Heading 3"
+					>
+						H3
+					</button>
+
+					<div class="toolbar-separator"></div>
+
+					<!-- Lists -->
+					<button
+						class="toolbar-btn"
+						class:active={isActive('bulletList')}
+						on:click={toggleBulletList}
+						title="Bullet List"
+					>
+						<Icon name="list" size={16} />
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('orderedList')}
+						on:click={toggleOrderedList}
+						title="Numbered List"
+					>
+						<Icon name="list-ordered" size={16} />
+					</button>
+					<button
+						class="toolbar-btn"
+						class:active={isActive('blockquote')}
+						on:click={toggleBlockquote}
+						title="Quote"
+					>
+						<Icon name="quote" size={16} />
+					</button>
+
+					<div class="toolbar-separator"></div>
+
+					<!-- Links -->
+					<button
+						class="toolbar-btn"
+						class:active={isActive('link')}
+						on:click|stopPropagation={setLink}
+						title={isActive('link') ? 'Remove Link' : 'Insert Link'}
+					>
+						<Icon name="link" size={16} />
+					</button>
 				</div>
-			</div>
-		{/if}
+				</div>
+			{/if}
+		</div>
 	{/if}
 
 	{#if $currentNote?.mode === 'whiteboard'}
 		<div class="whiteboard-layout">
 			<div class="editor-section">
 				<div class="editor-wrapper">
+					<!-- Note Title Field -->
+					{#if $currentNote}
+						<div class="editor-title-section">
+							{#if editingTitle}
+								<input
+									type="text"
+									class="editor-title-input"
+									bind:this={titleInputElement}
+									bind:value={titleInput}
+									on:blur={handleTitleBlur}
+									on:keydown={handleTitleKeydown}
+									placeholder="Note title..."
+									autofocus
+								/>
+							{:else}
+								<h1 
+									class="editor-title" 
+									class:empty={!$currentNote.title}
+									on:click={() => {
+										editingTitle = true;
+										titleInput = $currentNote.title || '';
+									}}
+									title="Click to edit title"
+								>
+									{$currentNote.title || 'Untitled Note'}
+								</h1>
+							{/if}
+						</div>
+					{/if}
 					<div bind:this={editorElement} class="editor"></div>
 				</div>
-				{#if $currentNote && editor}
-					<div class="floating-toolbar">
-						<div class="toolbar-content">
-							<!-- Text formatting -->
+			</div>
+			<div class="whiteboard-section">
+				{#if $currentNote}
+					<div class="whiteboard-toolbar-container">
+						<div class="whiteboard-toolbar-content">
+							<!-- Whiteboard Tools -->
 							<button
 								class="toolbar-btn"
-								class:active={isActive('bold')}
-								on:click={toggleBold}
-								title="Bold"
+								class:active={whiteboardTool === 'pen'}
+								on:click={() => {
+									whiteboardTool = 'pen';
+									if (whiteboardComponent) whiteboardComponent.setTool('pen');
+								}}
+								title="Pen"
 							>
-								<Icon name="bold" size={16} />
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+									<path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+									<path d="M2 2l7.586 7.586"></path>
+									<circle cx="11" cy="11" r="2"></circle>
+								</svg>
 							</button>
 							<button
 								class="toolbar-btn"
-								class:active={isActive('italic')}
-								on:click={toggleItalic}
-								title="Italic"
+								class:active={whiteboardTool === 'eraser'}
+								on:click={() => {
+									whiteboardTool = 'eraser';
+									if (whiteboardComponent) whiteboardComponent.setTool('eraser');
+								}}
+								title="Eraser"
 							>
-								<Icon name="italic" size={16} />
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"></path>
+								</svg>
 							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('strike')}
-								on:click={toggleStrike}
-								title="Strikethrough"
-							>
-								<Icon name="strikethrough" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('code')}
-								on:click={toggleCode}
-								title="Code"
-							>
-								<Icon name="code" size={16} />
-							</button>
-
+							
 							<div class="toolbar-separator"></div>
-
-							<!-- Headings -->
-							<button
-								class="toolbar-btn"
-								class:active={isActive('heading', { level: 1 })}
-								on:click={() => setHeading(1)}
-								title="Heading 1"
-							>
-								H1
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('heading', { level: 2 })}
-								on:click={() => setHeading(2)}
-								title="Heading 2"
-							>
-								H2
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('heading', { level: 3 })}
-								on:click={() => setHeading(3)}
-								title="Heading 3"
-							>
-								H3
-							</button>
-
-							<div class="toolbar-separator"></div>
-
-							<!-- Lists -->
-							<button
-								class="toolbar-btn"
-								class:active={isActive('bulletList')}
-								on:click={toggleBulletList}
-								title="Bullet List"
-							>
-								<Icon name="list" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('orderedList')}
-								on:click={toggleOrderedList}
-								title="Numbered List"
-							>
-								<Icon name="list-ordered" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive('blockquote')}
-								on:click={toggleBlockquote}
-								title="Quote"
-							>
-								<Icon name="quote" size={16} />
-							</button>
-
-							<div class="toolbar-separator"></div>
-
-							<!-- Links and Images -->
-							<button
-								class="toolbar-btn"
-								class:active={isActive('link')}
-								on:click|stopPropagation={setLink}
-								title={isActive('link') ? 'Remove Link' : 'Insert Link'}
-							>
-								<Icon name="link" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								on:click|stopPropagation={addImage}
-								title="Insert Image"
-							>
-								<Icon name="image" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								on:click={addTable}
-								title="Insert Table"
-							>
-								<Icon name="table" size={16} />
-							</button>
-
-							{#if isInTableState}
-								<button
-									class="toolbar-btn color-reset-btn"
-									on:click={deleteTable}
-									title="Delete Table"
-								>
-									<Icon name="trash" size={16} />
-								</button>
-							{/if}
-
-							<div class="toolbar-separator"></div>
-
-							<!-- Text alignment -->
-							<button
-								class="toolbar-btn"
-								class:active={isActive({ textAlign: 'left' })}
-								on:click={() => setTextAlign('left')}
-								title="Align Left"
-							>
-								<Icon name="align-left" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive({ textAlign: 'center' })}
-								on:click={() => setTextAlign('center')}
-								title="Align Center"
-							>
-								<Icon name="align-center" size={16} />
-							</button>
-							<button
-								class="toolbar-btn"
-								class:active={isActive({ textAlign: 'right' })}
-								on:click={() => setTextAlign('right')}
-								title="Align Right"
-							>
-								<Icon name="align-right" size={16} />
-							</button>
-
-							<div class="toolbar-separator"></div>
-
-							<!-- Text Color -->
-							<div class="color-picker-container">
-								<button
-									class="toolbar-btn color-picker-btn"
-									on:click={toggleColorPicker}
-									title="Text Color"
-								>
-									<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
-									<Icon name="palette" size={16} />
-								</button>
-
-								{#if showColorPicker}
-									<div class="color-picker-dropdown" bind:this={colorPickerElement}>
-										<div class="color-palette">
-											{#each colorPalette as color}
-												<button
-													class="color-option"
-													style="background-color: {color}"
-													on:click={() => applyColor(color)}
-													title={color}
-												></button>
-											{/each}
-										</div>
-										<div class="color-controls">
-											<input
-												type="color"
-												bind:value={customColor}
-												on:input={applyCustomColor}
-												class="custom-color-input"
-												title="Custom Color"
-											/>
-											<button
-												class="color-reset-btn"
-												on:click={resetColor}
-												title="Reset to default"
-											>
-												<Icon name="x" size={14} />
-											</button>
-										</div>
-									</div>
-								{/if}
+							
+							<!-- Whiteboard Color -->
+							<input 
+								type="color" 
+								bind:value={whiteboardColor}
+								on:change={() => {
+									if (whiteboardComponent) whiteboardComponent.setColor(whiteboardColor);
+								}}
+								class="whiteboard-color-input"
+								title="Whiteboard Color"
+							/>
+							
+							<!-- Whiteboard Line Width -->
+							<div class="whiteboard-width-control">
+								<input 
+									type="range" 
+									min="1" 
+									max="20" 
+									bind:value={whiteboardLineWidth}
+									on:input={() => {
+										if (whiteboardComponent) whiteboardComponent.setLineWidth(whiteboardLineWidth);
+									}}
+									class="whiteboard-width-input"
+									title="Line Width"
+								/>
+								<span class="whiteboard-width-label">{whiteboardLineWidth}px</span>
 							</div>
 							
-							{#if $currentNote?.mode === 'whiteboard'}
-								<div class="toolbar-separator"></div>
-								
-								<!-- Whiteboard Tools -->
-								<button
-									class="toolbar-btn"
-									class:active={whiteboardTool === 'pen'}
-									on:click={() => {
-										whiteboardTool = 'pen';
-										if (whiteboardComponent) whiteboardComponent.setTool('pen');
-									}}
-									title="Pen"
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path d="M12 19l7-7 3 3-7 7-3-3z"></path>
-										<path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
-										<path d="M2 2l7.586 7.586"></path>
-										<circle cx="11" cy="11" r="2"></circle>
-									</svg>
-								</button>
-								<button
-									class="toolbar-btn"
-									class:active={whiteboardTool === 'eraser'}
-									on:click={() => {
-										whiteboardTool = 'eraser';
-										if (whiteboardComponent) whiteboardComponent.setTool('eraser');
-									}}
-									title="Eraser"
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"></path>
-									</svg>
-								</button>
-								
-								<div class="toolbar-separator"></div>
-								
-								<!-- Whiteboard Color -->
-								<input 
-									type="color" 
-									bind:value={whiteboardColor}
-									on:change={() => {
-										if (whiteboardComponent) whiteboardComponent.setColor(whiteboardColor);
-									}}
-									class="whiteboard-color-input"
-									title="Whiteboard Color"
-								/>
-								
-								<!-- Whiteboard Line Width -->
-								<div class="whiteboard-width-control">
-									<input 
-										type="range" 
-										min="1" 
-										max="20" 
-										bind:value={whiteboardLineWidth}
-										on:input={() => {
-											if (whiteboardComponent) whiteboardComponent.setLineWidth(whiteboardLineWidth);
-										}}
-										class="whiteboard-width-input"
-										title="Line Width"
-									/>
-									<span class="whiteboard-width-label">{whiteboardLineWidth}px</span>
-								</div>
-								
-								<div class="toolbar-separator"></div>
-								
-								<!-- Clear Whiteboard -->
-								<button
-									class="toolbar-btn"
-									on:click={() => {
-										if (whiteboardComponent && confirm('Clear the entire whiteboard?')) {
-											whiteboardComponent.clearCanvas();
-										}
-									}}
-									title="Clear Whiteboard"
-								>
-									<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path d="M3 6h18"></path>
-										<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-										<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-									</svg>
-								</button>
-							{/if}
+							<div class="toolbar-separator"></div>
+							
+							<!-- Clear Whiteboard -->
+							<button
+								class="toolbar-btn"
+								on:click={() => {
+									if (whiteboardComponent && confirm('Clear the entire whiteboard?')) {
+										whiteboardComponent.clearCanvas();
+									}
+								}}
+								title="Clear Whiteboard"
+							>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M3 6h18"></path>
+									<path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+									<path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+								</svg>
+							</button>
 						</div>
 					</div>
 				{/if}
-			</div>
-			<div class="whiteboard-section">
 				<Whiteboard 
 					bind:this={whiteboardComponent}
 					bind:currentTool={whiteboardTool}
@@ -1026,11 +864,8 @@ import TurndownService from 'turndown';
 		position: relative;
 	}
 
-	.floating-toolbar {
+	.bubble-menu {
 		position: absolute;
-		bottom: 1.5rem;
-		left: 50%;
-		transform: translateX(-50%);
 		z-index: 100;
 		background: var(--bg-secondary);
 		border: 1px solid var(--border-color);
@@ -1040,8 +875,26 @@ import TurndownService from 'turndown';
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
-		max-width: calc(100% - 3rem);
-		overflow: visible;
+		pointer-events: auto;
+		animation: fadeInSlideUp 0.15s ease-out;
+	}
+
+	.bubble-menu .toolbar-content {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: nowrap;
+	}
+
+	@keyframes fadeInSlideUp {
+		from {
+			opacity: 0;
+			transform: translateX(-50%) translateY(5px);
+		}
+		to {
+			opacity: 1;
+			transform: translateX(-50%) translateY(0);
+		}
 	}
 
 	.floating-toolbar .toolbar-content {
@@ -1051,7 +904,7 @@ import TurndownService from 'turndown';
 		flex-wrap: nowrap;
 	}
 	
-	.whiteboard-color-input {
+	.whiteboard-toolbar-content .whiteboard-color-input {
 		width: 32px;
 		height: 32px;
 		border: 1px solid var(--border-color);
@@ -1061,20 +914,22 @@ import TurndownService from 'turndown';
 		background: transparent;
 	}
 	
-	.whiteboard-width-control {
+	.whiteboard-toolbar-content .whiteboard-width-control {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.25rem;
+		width: 100%;
 	}
 	
-	.whiteboard-width-input {
-		width: 60px;
+	.whiteboard-toolbar-content .whiteboard-width-input {
+		width: 80px;
 	}
 	
-	.whiteboard-width-label {
+	.whiteboard-toolbar-content .whiteboard-width-label {
 		font-size: 0.75rem;
 		color: var(--text-secondary);
-		min-width: 35px;
+		text-align: center;
 	}
 
 	.toolbar-left {
@@ -1256,6 +1111,50 @@ import TurndownService from 'turndown';
 		flex-direction: column;
 		overflow: auto;
 		padding-bottom: 4rem;
+		position: relative;
+	}
+
+	.editor-title-section {
+		padding: 1.5rem 1.5rem 0.5rem 1.5rem;
+		max-width: 800px;
+		margin: 0 auto;
+		width: 100%;
+		border-bottom: 1px solid var(--border-color);
+		margin-bottom: 1rem;
+	}
+
+	.editor-title {
+		font-size: 2rem;
+		font-weight: var(--font-weight-bold);
+		color: var(--text-primary);
+		margin: 0;
+		padding: 0.5rem 0;
+		cursor: text;
+		transition: var(--transition);
+		line-height: 1.2;
+	}
+
+	.editor-title:hover {
+		color: var(--accent-color);
+	}
+
+	.editor-title-input {
+		width: 100%;
+		background: transparent;
+		border: none;
+		border-bottom: 2px solid var(--accent-color);
+		color: var(--text-primary);
+		font-size: 2rem;
+		font-weight: var(--font-weight-bold);
+		padding: 0.5rem 0;
+		font-family: inherit;
+		outline: none;
+		line-height: 1.2;
+	}
+
+	.editor-title-input::placeholder {
+		color: var(--text-secondary);
+		opacity: 0.5;
 	}
 	
 	.whiteboard-layout {
@@ -1287,6 +1186,27 @@ import TurndownService from 'turndown';
 		flex-direction: column;
 		background: var(--bg-primary);
 		overflow: hidden;
+		position: relative;
+	}
+
+	.whiteboard-toolbar-container {
+		position: absolute;
+		bottom: 1.5rem;
+		left: 50%;
+		transform: translateX(-50%);
+		z-index: 100;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+		padding: 0.5rem;
+	}
+
+	.whiteboard-toolbar-content {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5rem;
 	}
 	
 	.mode-toggle-btn {

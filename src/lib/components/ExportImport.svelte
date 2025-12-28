@@ -6,6 +6,10 @@
 	import { signBackup, verifyBackup } from '../utils/backupIntegrity.js';
 	import { saveFileDialog } from '../utils/electronFileAPI.js';
 	import Icon from './Icon.svelte';
+	import { browser } from '$app/environment';
+
+	export let showButton = true; // Allow hiding the trigger button when used in settings
+	export let inline = false; // If true, show content inline instead of in a modal
 
 	let showModal = false;
 	let exportFormat = 'password'; // 'password', 'encrypted', or 'plaintext'
@@ -47,6 +51,21 @@
 	function closeModal() {
 		showModal = false;
 		importData = '';
+	}
+
+	// Portal action to append modal to body
+	function portal(node) {
+		if (!browser) return;
+		
+		document.body.appendChild(node);
+		
+		return {
+			destroy() {
+				if (node.parentNode) {
+					node.parentNode.removeChild(node);
+				}
+			}
+		};
 	}
 
 	async function exportAllNotes() {
@@ -456,14 +475,218 @@
 </script>
 
 <!-- Trigger button (can be placed anywhere) -->
-<button class="export-import-btn" on:click={openModal}>
-	<Icon name="package" size={16} />
-	<span>Backup</span>
-</button>
+{#if showButton && !inline}
+	<button class="export-import-btn" on:click={openModal}>
+		<Icon name="package" size={16} />
+		<span>Backup</span>
+	</button>
+{/if}
 
-<!-- Modal -->
-{#if showModal}
-	<div class="modal-overlay" on:click={closeModal}>
+<!-- Inline Content -->
+{#if inline}
+	<div class="export-import-inline">
+		<div class="modal-body">
+			<!-- Export Section -->
+			<div class="section">
+					<h4><Icon name="upload" size={18} /> Export Notes</h4>
+					<p>Export all your notes as a backup file</p>
+
+					<div class="export-options">
+						<label class="radio-option">
+							<input
+								type="radio"
+								bind:group={exportFormat}
+								value="password"
+							/>
+							<span class="radio-label">
+								<strong><Icon name="shield" size={16} /> Password-protected</strong> - Encrypt entire backup with custom password (most secure)
+							</span>
+						</label>
+
+						<label class="radio-option">
+							<input
+								type="radio"
+								bind:group={exportFormat}
+								value="encrypted"
+							/>
+							<span class="radio-label">
+								<strong>Encrypted</strong> - Export with app encryption (medium security)
+							</span>
+						</label>
+
+						<label class="radio-option">
+							<input
+								type="radio"
+								bind:group={exportFormat}
+								value="plaintext"
+							/>
+							<span class="radio-label">
+								<strong>Plain text</strong> - Export readable text (least secure)
+							</span>
+						</label>
+					</div>
+
+					{#if exportFormat === 'password'}
+						<div class="password-section">
+							<div class="password-inputs">
+								<input
+									type="password"
+									placeholder="Enter export password"
+									bind:value={exportPassword}
+									class="password-field"
+								/>
+								<input
+									type="password"
+									placeholder="Confirm export password"
+									bind:value={confirmPassword}
+									class="password-field"
+								/>
+							</div>
+							{#if passwordError}
+								<div class="error-message">{passwordError}</div>
+							{/if}
+							<p class="password-hint">
+								This password protects your exported backup. Choose a strong password different from your app password.
+							</p>
+						</div>
+					{/if}
+
+					<button
+						class="action-btn primary"
+						on:click={exportAllNotes}
+						disabled={isExporting || $notesMetadata.length === 0}
+					>
+						{#if isExporting}
+							<Icon name="upload" size={16} />
+							Exporting...
+						{:else}
+							<Icon name="upload" size={16} />
+							Export {$notesMetadata.length} Notes
+						{/if}
+					</button>
+
+					{#if exportSuccess}
+						<div class="success-message">{exportSuccess}</div>
+					{/if}
+
+					<div class="backup-info">
+						<p><strong><Icon name="lightbulb" size={16} /> Security Tips:</strong></p>
+						<ul>
+							<li><strong><Icon name="shield" size={14} /> Password-protected backups:</strong> Most secure, entire file encrypted</li>
+							<li><strong><Icon name="lock" size={14} /> Encrypted app backups:</strong> Uses app encryption, medium security</li>
+							<li><strong><Icon name="fileText" size={14} /> Plain text backups:</strong> Readable but vulnerable to interception</li>
+							<li><strong><Icon name="fileText" size={14} /> .pnote files:</strong> Secure single notes with custom password</li>
+							<li>Store sensitive files only in encrypted cloud storage</li>
+							<li>Test restoration with small backups before relying on them</li>
+							<li>Use strong, unique passwords for protected exports</li>
+							<li>.pnote files are completely unreadable without password</li>
+						</ul>
+					</div>
+				</div>
+
+				<div class="divider"></div>
+
+				<!-- Maintenance Section -->
+				<div class="section">
+					<h4><Icon name="settings" size={18} /> Database Maintenance</h4>
+					<p>Fix issues with corrupted or legacy notes</p>
+
+					<button
+						class="action-btn warning"
+						on:click={cleanupDatabase}
+						disabled={isImporting}
+					>
+						<Icon name="settings" size={16} />
+						Clean & Migrate Database
+					</button>
+
+					{#if cleanupResult}
+						<div class="success-message">
+							Cleanup complete: {cleanupResult.migrated} migrated, {cleanupResult.cleaned} cleaned
+						</div>
+					{/if}
+				</div>
+
+				<div class="divider"></div>
+
+				<!-- Import Section -->
+				<div class="section">
+					<h4><Icon name="download" size={18} /> Import Notes</h4>
+					<p>Import notes from backup files (supports encrypted and plain backups)</p>
+
+					<div class="import-controls">
+						<input
+							type="file"
+							accept=".json,.pnote"
+							on:change={handleFileSelect}
+							bind:this={fileInput}
+							style="display: none"
+						/>
+
+						<button
+							class="action-btn secondary"
+							on:click={() => fileInput.click()}
+						>
+							<Icon name="folderOpen" size={16} />
+							Choose File (.json or .pnote)
+						</button>
+
+						{#if importData}
+							<div class="file-info">
+								{#if importFileType === 'bulk-protected'}
+									<Icon name="package" size={16} /> Bulk backup (encrypted) - ({importData.length} characters)
+									<span class="encrypted-badge"><Icon name="shield" size={12} /> Password-protected</span>
+								{:else if importFileType === 'single-protected'}
+									<Icon name="fileText" size={16} /> Secure note (.pnote file) - ({importData.length} characters)
+									<span class="encrypted-badge"><Icon name="shield" size={12} /> Password-protected</span>
+								{:else if importFileType === 'bulk-plain'}
+									<Icon name="package" size={16} /> Bulk backup (unencrypted) - ({importData.length} characters)
+									<span class="warning-badge"><Icon name="alertTriangle" size={12} /> Unencrypted</span>
+								{:else if importFileType === 'invalid'}
+									<Icon name="x" size={16} /> Invalid or corrupted file
+								{:else}
+									<Icon name="fileText" size={16} /> Unknown file type - ({importData.length} characters)
+								{/if}
+							</div>
+
+							{#if isPasswordProtectedBackup}
+								<div class="password-section">
+									<input
+										type="password"
+										placeholder="Enter backup password"
+										bind:value={importPassword}
+										class="password-field"
+									/>
+								</div>
+							{/if}
+
+							<button
+								class="action-btn primary"
+								on:click={importNotes}
+								disabled={isImporting}
+							>
+								{#if isImporting}
+									<Icon name="download" size={16} />
+									Importing...
+								{:else}
+									<Icon name="download" size={16} />
+									Import Notes
+								{/if}
+							</button>
+						{/if}
+					</div>
+
+					{#if importError}
+						<div class="error-message">{importError}</div>
+					{/if}
+				</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Modal Content -->
+{#if showModal && !inline}
+	<div class="modal-overlay" use:portal on:click={closeModal}>
 		<div class="modal-content" on:click|stopPropagation>
 			<div class="modal-header">
 				<h3>Backup & Import</h3>
@@ -751,6 +974,14 @@
 
 	.modal-body {
 		padding: 1.5rem;
+	}
+
+	.export-import-inline {
+		width: 100%;
+	}
+
+	.export-import-inline .modal-body {
+		padding: 0;
 	}
 
 	.section {

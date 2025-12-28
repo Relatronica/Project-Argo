@@ -9,13 +9,10 @@
 	import NoteList from '../lib/components/NoteList.svelte';
 	import SearchBar from '../lib/components/SearchBar.svelte';
 	import TiptapEditor from '../lib/components/TiptapEditor.svelte';
-	import ExportImport from '../lib/components/ExportImport.svelte';
 	import MoveMenu from '../lib/components/MoveMenu.svelte';
 	import Icon from '../lib/components/Icon.svelte';
-	import TagManager from '../lib/components/TagManager.svelte';
 	import { extractNoteTitle } from '../lib/utils/noteHelpers.js';
 	import { saveFileDialog } from '../lib/utils/electronFileAPI.js';
-	import { isDarkTheme, toggleTheme } from '../lib/stores/themeStore.js';
 
 	let sidebarOpen = true;
 	let editingTitle = false;
@@ -383,6 +380,7 @@
 		</div>
 
 		<div class="main-content">
+			{#if !sidebarOpen || $currentNote}
 			<div class="toolbar">
 			<div class="toolbar-left">
 				{#if !sidebarOpen}
@@ -395,15 +393,6 @@
 					</button>
 				{/if}
 				{#if $currentNote}
-					<TagManager
-						tags={$currentNote.tags}
-						availableTags={$allTags}
-						on:change={(e) => {
-							if ($currentNote) {
-								$currentNote.tags = e.detail.tags;
-							}
-						}}
-					/>
 					{#if $currentNote.color}
 						<div 
 							class="header-color-indicator" 
@@ -455,27 +444,7 @@
 								<span>Saved</span>
 							{/if}
 						</div>
-						{#if $currentNote.encrypted}
-							<div class="header-info encrypted">
-								<Icon name="lock" size={14} />
-								<span>Encrypted</span>
-							</div>
-						{/if}
-						<div class="header-info">
-							<Icon name="calendar" size={14} />
-							<span>{new Date($currentNote.updated).toLocaleDateString()}</span>
-						</div>
 					</div>
-					
-					<!-- Delete Button -->
-					<button
-						class="header-btn delete-btn"
-						on:click={handleDeleteNote}
-						disabled={deletingNoteId === $currentNote.id}
-						title="Delete note"
-					>
-						<Icon name="trash" size={16} />
-					</button>
 					
 					<button
 						class="mode-toggle-btn"
@@ -495,7 +464,6 @@
 								<line x1="9" y1="3" x2="9" y2="21"></line>
 								<line x1="3" y1="9" x2="21" y2="9"></line>
 							</svg>
-							<span>Whiteboard</span>
 						{:else}
 							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -504,20 +472,22 @@
 								<line x1="16" y1="17" x2="8" y2="17"></line>
 								<polyline points="10 9 9 9 8 9"></polyline>
 							</svg>
-							<span>Text</span>
 						{/if}
 					</button>
+					
+					<!-- Delete Button -->
+					<button
+						class="header-btn delete-btn"
+						on:click={handleDeleteNote}
+						disabled={deletingNoteId === $currentNote.id}
+						title="Delete note"
+					>
+						<Icon name="trash" size={16} />
+					</button>
 				{/if}
-				<button 
-					class="theme-toggle-btn" 
-					on:click={toggleTheme}
-					title={$isDarkTheme ? "Passa alla modalità chiara" : "Passa alla modalità scura"}
-				>
-					<Icon name={$isDarkTheme ? 'sun' : 'moon'} size={18} />
-				</button>
-				<ExportImport />
 			</div>
 			</div>
+			{/if}
 			<div class="editor-area">
 				{#if $currentNote}
 					<TiptapEditor />
@@ -1077,16 +1047,15 @@
 	.mode-toggle-btn {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.5rem 0.75rem;
+		justify-content: center;
+		padding: 0.5rem;
 		background: var(--bg-tertiary);
 		border: 1px solid var(--border-color);
 		border-radius: var(--radius-sm);
 		color: var(--text-secondary);
 		cursor: pointer;
 		transition: var(--transition);
-		font-size: 0.85rem;
-		font-weight: 500;
+		min-width: 36px;
 		height: 36px;
 	}
 	
