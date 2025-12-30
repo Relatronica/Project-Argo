@@ -11,7 +11,7 @@
 	import { TextAlign } from '@tiptap/extension-text-align';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
-	import { currentNote, saveCurrentNote, saveStatus, updateNoteTitle } from '../stores/notesStore.js';
+	import { currentNote, saveCurrentNote, saveStatus, hasUnsavedChanges, updateNoteTitle } from '../stores/notesStore.js';
 	import { isDarkTheme } from '../stores/themeStore.js';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
@@ -117,6 +117,8 @@ import TurndownService from 'turndown';
 				if ($currentNote) {
 					const html = editor.getHTML();
 					$currentNote.content = html;
+					// Mark as having unsaved changes
+					hasUnsavedChanges.set(true);
 					// Update metadata for real-time title updates in the list
 					import('../stores/notesStore.js').then(({ updateCurrentNoteMetadata }) => {
 						updateCurrentNoteMetadata();
@@ -522,8 +524,7 @@ import TurndownService from 'turndown';
 </script>
 
 <div class="editor-container">
-	{#if $currentNote?.mode !== 'whiteboard'}
-		<div class="editor-wrapper" bind:this={editorWrapperElement}>
+	<div class="editor-wrapper" class:hidden={$currentNote?.mode === 'whiteboard'} bind:this={editorWrapperElement}>
 			<!-- Note Title Field -->
 			{#if $currentNote}
 				<div class="editor-title-section">
@@ -539,8 +540,8 @@ import TurndownService from 'turndown';
 							autofocus
 						/>
 					{:else}
-						<h1 
-							class="editor-title" 
+						<h1
+							class="editor-title"
 							class:empty={!$currentNote.title}
 							on:click={() => {
 								editingTitle = true;
@@ -555,8 +556,8 @@ import TurndownService from 'turndown';
 			{/if}
 			<div bind:this={editorElement} class="editor"></div>
 			{#if $currentNote && editor && showBubbleMenu}
-				<div 
-					class="bubble-menu" 
+				<div
+					class="bubble-menu"
 					bind:this={bubbleMenuElement}
 					style="top: {bubbleMenuPosition.top}px; left: {bubbleMenuPosition.left}px; transform: translateX(-50%);"
 				>
@@ -666,10 +667,8 @@ import TurndownService from 'turndown';
 				</div>
 			{/if}
 		</div>
-	{/if}
 
-	{#if $currentNote?.mode === 'whiteboard'}
-		<div class="whiteboard-layout">
+	<div class="whiteboard-layout" class:hidden={$currentNote?.mode !== 'whiteboard'}>
 			<div class="editor-section">
 				<div class="editor-wrapper">
 					<!-- Note Title Field -->
@@ -799,8 +798,7 @@ import TurndownService from 'turndown';
 				/>
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
 
 <!-- Link Modal -->
 {#if showLinkModal}
@@ -857,6 +855,10 @@ import TurndownService from 'turndown';
 {/if}
 
 <style>
+	.hidden {
+		display: none !important;
+	}
+
 	.editor-container {
 		display: flex;
 		flex-direction: column;

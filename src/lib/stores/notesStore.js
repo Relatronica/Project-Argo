@@ -32,6 +32,9 @@ export const searchQuery = writable('');
 // Store for save status: 'idle' | 'saving' | 'saved' | 'error'
 export const saveStatus = writable('idle');
 
+// Store for tracking unsaved changes (dirty state)
+export const hasUnsavedChanges = writable(false);
+
 // Helper function to check if a note matches search query
 function noteMatchesSearch(note, query) {
 	if (!query.trim()) return true;
@@ -154,15 +157,18 @@ export async function saveCurrentNote() {
 		await $currentNote.save($masterKey, encryptNote);
 		// Reload notes list
 		await loadNotes();
-		
+
+		// Reset dirty state since changes have been saved
+		hasUnsavedChanges.set(false);
+
 		// Set status to saved
 		saveStatus.set('saved');
-		
+
 		// Reset to idle after 2 seconds
 		setTimeout(() => {
 			saveStatus.set('idle');
 		}, 2000);
-		
+
 		return true;
 	} catch (error) {
 		logger.error('Error saving note:', error);

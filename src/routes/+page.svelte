@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import { isUnlocked } from '../lib/stores/keyStore.js';
 	import { initializeAutoLock, recordActivity } from '../lib/utils/autoLock.js';
-	import { masterKey, currentNote, saveCurrentNote, createNewNote, saveStatus, updateNoteTitle, updateNoteColor, toggleNoteFavorite, moveNoteToFolder, deleteNoteById, allTags } from '../lib/stores/notesStore.js';
+	import { masterKey, currentNote, saveCurrentNote, createNewNote, saveStatus, hasUnsavedChanges, updateNoteTitle, updateNoteColor, toggleNoteFavorite, moveNoteToFolder, deleteNoteById, allTags } from '../lib/stores/notesStore.js';
 	import { allFolders } from '../lib/stores/folderStore.js';
 	import UnlockScreen from '../lib/components/UnlockScreen.svelte';
 	import NoteList from '../lib/components/NoteList.svelte';
@@ -163,9 +163,10 @@
 		showMoveMenu = false;
 	}
 
-	// Reset save status when note changes
+	// Reset save status and dirty state when note changes
 	$: if ($currentNote) {
 		saveStatus.set('idle');
+		hasUnsavedChanges.set(false);
 	}
 
 	// Auto-save is now handled in TiptapEditor component
@@ -445,9 +446,18 @@
 				{#if $currentNote}
 					<!-- Status Info -->
 					<div class="header-status">
-						<div class="header-info save-status" class:saving={$saveStatus === 'saving'} class:saved={$saveStatus === 'saved' || $saveStatus === 'idle'} class:error={$saveStatus === 'error'}>
-							{#if $saveStatus === 'saving'}
-								<Icon name="loader" size={14} class="spinning" />
+						<div class="header-info save-status" class:saving={$saveStatus === 'saving'} class:saved={($saveStatus === 'saved' || $saveStatus === 'idle') && !$hasUnsavedChanges} class:error={$saveStatus === 'error'} class:unsaved={$hasUnsavedChanges && $saveStatus !== 'saving'}>
+							{#if $saveStatus === 'saving' || $hasUnsavedChanges}
+								<svg class="saving-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+									<path opacity="0.25" d="M12 2V6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path opacity="0.75" d="M12 18V22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path opacity="0.5" d="M4.93 4.93L7.76 7.76" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path d="M16.24 16.24L19.07 19.07" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path opacity="0.75" d="M2 12H6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path opacity="0.25" d="M18 12H22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path d="M4.93 19.07L7.76 16.24" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+									<path opacity="0.5" d="M16.24 7.76L19.07 4.93" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+								</svg>
 								<span>Saving...</span>
 							{:else if $saveStatus === 'error'}
 								<Icon name="alertTriangle" size={14} />
@@ -836,15 +846,34 @@
 	.header-info.save-status.error {
 		color: var(--error-color, #ef4444);
 	}
-	
+
 	.header-info.save-status.error :global(.icon) {
 		color: var(--error-color, #ef4444);
 	}
-	
-	.header-info.save-status :global(.spinning) {
-		animation: spin 1s linear infinite;
+
+	.header-info.save-status.unsaved {
+		color: var(--accent-color);
 	}
-	
+
+	.header-info.save-status.unsaved :global(.icon) {
+		color: var(--accent-color);
+	}
+
+	.saving-spinner {
+		animation: spin 1s linear infinite;
+		color: var(--accent-color);
+		flex-shrink: 0;
+	}
+
+	@keyframes spin {
+		from {
+			transform: rotate(0deg);
+		}
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
 	.header-info.encrypted {
 		color: var(--success-color, #10b981);
 		font-weight: 500;
@@ -1166,18 +1195,6 @@
 		color: var(--error-color);
 	}
 	
-	.save-status :global(.spinning) {
-		animation: spin 1s linear infinite;
-	}
-	
-	@keyframes spin {
-		from {
-			transform: rotate(0deg);
-		}
-		to {
-			transform: rotate(360deg);
-		}
-	}
 	
 	.status-encrypted,
 	.status-updated {

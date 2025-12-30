@@ -1,6 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { currentNote, saveCurrentNote } from '../stores/notesStore.js';
+	import { currentNote, saveCurrentNote, hasUnsavedChanges } from '../stores/notesStore.js';
 	
 	let canvas;
 	let ctx;
@@ -33,6 +33,8 @@
 		if (ctx) {
 			ctx.clearRect(0, 0, canvas.width / window.devicePixelRatio, canvas.height / window.devicePixelRatio);
 		}
+		// Mark as having unsaved changes when clearing canvas
+		hasUnsavedChanges.set(true);
 		saveWhiteboardData();
 	}
 	let autoSaveTimer = null;
@@ -244,12 +246,14 @@
 	function stopDrawing() {
 		if (!isDrawing) return;
 		isDrawing = false;
-		
+
 		if (currentPath && currentPath.points.length > 0) {
 			paths.push(currentPath);
+			// Mark as having unsaved changes when drawing
+			hasUnsavedChanges.set(true);
 			saveWhiteboardData();
 		}
-		
+
 		currentPath = null;
 		ctx.globalCompositeOperation = 'source-over';
 	}
