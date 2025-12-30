@@ -23,6 +23,8 @@ export class Note {
 		this.fileHandle = data.fileHandle || null;
 		this.ciphertext = data.ciphertext || null;
 		this.nonce = data.nonce || null;
+		this.whiteboardCiphertext = data.whiteboardCiphertext || null; // Encrypted whiteboard data
+		this.whiteboardNonce = data.whiteboardNonce || null; // Encryption nonce for whiteboard
 	}
 
 	/**
@@ -79,7 +81,7 @@ export class Note {
 		return {
 			id: this.id,
 			title: this.title || this.extractTitle(), // Store explicit title or fallback
-			content: this.content, // Store actual content
+			content: this.content, // Store actual content (plaintext if not encrypted, null if encrypted)
 			tags: this.tags,
 			folder: this.folder,
 			created: this.created,
@@ -88,15 +90,19 @@ export class Note {
 			favorite: this.favorite,
 			color: this.color, // Store note color
 			mode: this.mode, // Store note mode
-			whiteboardData: this.whiteboardData, // Store whiteboard data
+			// Store whiteboard data: plaintext if not encrypted, null if encrypted
+			// For encrypted notes, whiteboardCiphertext/whiteboardNonce are used instead
+			whiteboardData: this.encrypted ? null : this.whiteboardData,
 			ciphertext: this.ciphertext, // Store encrypted content
 			nonce: this.nonce, // Store encryption nonce
-			contentLength: this.content.length
+			whiteboardCiphertext: this.whiteboardCiphertext, // Store encrypted whiteboard data
+			whiteboardNonce: this.whiteboardNonce, // Store encryption nonce for whiteboard
+			contentLength: this.content ? this.content.length : 0
 		};
 	}
 
 	/**
-	 * Encrypt note content
+	 * Encrypt note content and whiteboard data
 	 * @param {Uint8Array} masterKey - Master encryption key
 	 * @param {Function} encryptNote - Encryption function (loaded dynamically)
 	 */
@@ -105,13 +111,43 @@ export class Note {
 			return;
 		}
 
+		if (!encryptNote || typeof encryptNote !== 'function') {
+			throw new Error('encryptNote function is required for encryption');
+		}
+
+		// Encrypt content
 		const encrypted = await encryptNote(this.content, this.id, masterKey);
+		if (!encrypted || !encrypted.ciphertext || !encrypted.nonce) {
+			throw new Error('Encryption failed: invalid result from encryptNote');
+		}
 		this.ciphertext = encrypted.ciphertext;
 		this.nonce = encrypted.nonce;
+
+		// Encrypt whiteboard data if present
+		// If whiteboardData is present, it takes priority over whiteboardCiphertext (newer data)
+		if (this.whiteboardData) {
+			// Convert whiteboardData to string if it's an object
+			const whiteboardString = typeof this.whiteboardData === 'string' 
+				? this.whiteboardData 
+				: JSON.stringify(this.whiteboardData);
+			
+			// Use a different note ID suffix for whiteboard to derive a different key
+			const whiteboardEncrypted = await encryptNote(whiteboardString, `${this.id}-whiteboard`, masterKey);
+			if (!whiteboardEncrypted || !whiteboardEncrypted.ciphertext || !whiteboardEncrypted.nonce) {
+				throw new Error('Whiteboard encryption failed: invalid result from encryptNote');
+			}
+			this.whiteboardCiphertext = whiteboardEncrypted.ciphertext;
+			this.whiteboardNonce = whiteboardEncrypted.nonce;
+			// Clear plaintext whiteboard data after encryption
+			this.whiteboardData = null;
+		} else if (this.whiteboardCiphertext && this.whiteboardNonce) {
+			// Whiteboard data is already encrypted, keep it as is
+			// No need to re-encrypt
+		}
 	}
 
 	/**
-	 * Decrypt note content
+	 * Decrypt note content and whiteboard data
 	 * @param {Uint8Array} masterKey - Master decryption key
 	 * @param {Function} decryptNote - Decryption function (loaded dynamically)
 	 */
@@ -129,6 +165,7 @@ export class Note {
 		}
 
 		try {
+			// Decrypt content
 			this.content = await decryptNote(
 				{
 					ciphertext: this.ciphertext,
@@ -137,6 +174,31 @@ export class Note {
 				},
 				masterKey
 			);
+
+			// Decrypt whiteboard data if present
+			// If whiteboardData is already in plaintext (retrocompatibility), keep it
+			if (!this.whiteboardData && this.whiteboardCiphertext && this.whiteboardNonce) {
+				try {
+					const whiteboardString = await decryptNote(
+						{
+							ciphertext: this.whiteboardCiphertext,
+							nonce: this.whiteboardNonce,
+							noteId: `${this.id}-whiteboard`
+						},
+						masterKey
+					);
+					// Try to parse as JSON, fallback to string
+					try {
+						this.whiteboardData = JSON.parse(whiteboardString);
+					} catch {
+						this.whiteboardData = whiteboardString;
+					}
+				} catch (error) {
+					console.error('Failed to decrypt whiteboard data:', error);
+					// Don't fail the entire decryption if whiteboard fails
+					this.whiteboardData = null;
+				}
+			}
 		} catch (error) {
 			console.error('Failed to decrypt note:', error);
 			// If decryption fails, treat as plaintext
@@ -159,6 +221,12 @@ export class Note {
 			await this.encrypt(masterKey, encryptNote);
 		} else {
 			this.encrypted = false;
+			// If note is not encrypted but has encrypted whiteboard data from before,
+			// clear the encrypted fields
+			if (this.whiteboardCiphertext || this.whiteboardNonce) {
+				this.whiteboardCiphertext = null;
+				this.whiteboardNonce = null;
+			}
 		}
 
 		// Save full data to IndexedDB
@@ -187,8 +255,12 @@ export class Note {
 			updated: this.updated,
 			encrypted: this.encrypted,
 			favorite: this.favorite,
+			mode: this.mode,
+			whiteboardData: this.whiteboardData,
 			ciphertext: this.ciphertext,
-			nonce: this.nonce
+			nonce: this.nonce,
+			whiteboardCiphertext: this.whiteboardCiphertext,
+			whiteboardNonce: this.whiteboardNonce
 		};
 	}
 

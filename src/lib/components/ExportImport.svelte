@@ -108,9 +108,13 @@
 					tags: note.tags,
 					created: note.created,
 					updated: note.updated,
+					mode: note.mode || 'text',
+					whiteboardData: note.whiteboardData || null,
 					encrypted: exportFormat === 'encrypted' ? note.encrypted : false,
 					ciphertext: exportFormat === 'encrypted' ? note.ciphertext : undefined,
-					nonce: exportFormat === 'encrypted' ? note.nonce : undefined
+					nonce: exportFormat === 'encrypted' ? note.nonce : undefined,
+					whiteboardCiphertext: exportFormat === 'encrypted' ? note.whiteboardCiphertext : undefined,
+					whiteboardNonce: exportFormat === 'encrypted' ? note.whiteboardNonce : undefined
 				}))
 			};
 

@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import { getAllNotesMetadata, searchNotes } from '../storage/localStorage.js';
+import { getAllNotesMetadata, searchNotes, deleteNoteMetadata, forceDeleteNoteMetadata } from '../storage/localStorage.js';
 import { Note } from '../models/note.js';
 import { browser } from '$app/environment';
 import { logger } from '../utils/logger.js';
@@ -214,19 +214,26 @@ export async function updateNoteTitle(noteId, title) {
 		const $currentNote = get(currentNote);
 		const $notesMetadata = get(notesMetadata);
 		
-		// Find the note
-		const noteMetadata = $notesMetadata.find(n => n.id === noteId);
-		if (!noteMetadata) return false;
-		
 		// Load the full note if not already loaded
 		let note = null;
 		if ($currentNote && $currentNote.id === noteId) {
+			// Use current note if it's the one being updated
 			note = $currentNote;
 		} else {
+			// Try to load from storage
 			note = await loadNoteById(noteId);
 		}
 		
-		if (!note) return false;
+		// If note doesn't exist in storage but is the current note, use it
+		// This handles the case of newly created notes that haven't been saved yet
+		if (!note && $currentNote && $currentNote.id === noteId) {
+			note = $currentNote;
+		}
+		
+		if (!note) {
+			logger.warn(`Note ${noteId} not found for title update`);
+			return false;
+		}
 		
 		// Update title
 		note.title = title || '';
@@ -242,19 +249,8 @@ export async function updateNoteTitle(noteId, title) {
 		
 		await note.save($masterKey, encryptNote);
 		
-		// Update metadata in store
-		const updatedMetadata = $notesMetadata.map(n => {
-			if (n.id === noteId) {
-				return {
-					...n,
-					title: title || note.extractTitle(),
-					updated: note.updated
-				};
-			}
-			return n;
-		});
-		
-		notesMetadata.set(updatedMetadata);
+		// Reload notes list to ensure metadata is up to date
+		await loadNotes();
 		
 		// Update current note if it's the one being updated
 		if ($currentNote && $currentNote.id === noteId) {
@@ -278,7 +274,10 @@ export async function updateNoteColor(noteId, color) {
 		
 		// Find the note
 		const noteMetadata = $notesMetadata.find(n => n.id === noteId);
-		if (!noteMetadata) return false;
+		if (!noteMetadata) {
+			logger.error('Note not found in metadata:', noteId);
+			return false;
+		}
 		
 		// Load the full note if not already loaded
 		let note = null;
@@ -288,7 +287,10 @@ export async function updateNoteColor(noteId, color) {
 			note = await loadNoteById(noteId);
 		}
 		
-		if (!note) return false;
+		if (!note) {
+			logger.error('Failed to load note:', noteId);
+			return false;
+		}
 		
 		// Update color
 		note.color = color;
@@ -298,19 +300,40 @@ export async function updateNoteColor(noteId, color) {
 		const $masterKey = get(masterKey);
 		let encryptNote = null;
 		if ($masterKey) {
-			const cryptoModule = await loadCrypto();
-			encryptNote = cryptoModule.encryptNote;
+			try {
+				// Verify masterKey is a Uint8Array
+				if (!($masterKey instanceof Uint8Array)) {
+					logger.warn('masterKey is not a Uint8Array, saving note unencrypted');
+					encryptNote = null;
+				} else {
+					const cryptoModule = await loadCrypto();
+					encryptNote = cryptoModule?.encryptNote;
+					if (!encryptNote || typeof encryptNote !== 'function') {
+						logger.warn('encryptNote is not available or not a function, saving note unencrypted');
+						encryptNote = null;
+					}
+				}
+			} catch (cryptoError) {
+				logger.warn('Failed to load crypto module, saving note unencrypted:', cryptoError);
+				encryptNote = null;
+			}
 		}
 		
-		await note.save($masterKey, encryptNote);
+		try {
+			await note.save($masterKey, encryptNote);
+		} catch (saveError) {
+			logger.error('Failed to save note:', saveError);
+			throw saveError;
+		}
 		
-		// Update metadata in store
+		// Update metadata in store - use getMetadata() to ensure all properties are included
+		const noteMetadata = note.getMetadata();
 		const updatedMetadata = $notesMetadata.map(n => {
 			if (n.id === noteId) {
+				// Return new object with all metadata from note.getMetadata()
+				// This ensures color and all other properties are up to date
 				return {
-					...n,
-					color: color,
-					updated: note.updated
+					...noteMetadata
 				};
 			}
 			return n;
@@ -325,7 +348,17 @@ export async function updateNoteColor(noteId, color) {
 		
 		return true;
 	} catch (error) {
+		// Log error with full details before sanitization
+		const errorDetails = {
+			message: error?.message || 'Unknown error',
+			stack: error?.stack || 'No stack trace',
+			name: error?.name || 'Error',
+			toString: String(error)
+		};
+		console.error('[ERROR] Error updating note color - raw error:', error);
+		console.error('[ERROR] Error updating note color - details:', errorDetails);
 		logger.error('Error updating note color:', error);
+		logger.error('Error details:', errorDetails);
 		return false;
 	}
 }
@@ -435,16 +468,50 @@ export async function moveNoteToFolder(noteId, folderPath) {
  */
 export async function deleteNoteById(noteId) {
 	try {
-		const note = await Note.load(noteId);
-		if (note) {
-			await note.delete();
+		logger.debug(`Attempting to delete note ${noteId}`);
+		
+		// Try normal deletion first
+		try {
+			await deleteNoteMetadata(noteId);
+		} catch (error) {
+			logger.warn(`Normal deletion failed for note ${noteId}, trying force delete:`, error);
+			// If normal deletion fails, try force delete
+			await forceDeleteNoteMetadata(noteId);
+		}
+		
+		// Wait a bit to ensure transaction is committed
+		await new Promise(resolve => setTimeout(resolve, 150));
+		
+		// Reload notes list to update UI
+		await loadNotes();
+		
+		// Verify deletion by checking if note still exists
+		const $notesMetadata = get(notesMetadata);
+		const noteStillExists = $notesMetadata.some(note => note.id === noteId);
+		
+		if (noteStillExists) {
+			logger.warn(`Note ${noteId} still exists after deletion attempt, using force delete`);
+			// Use force delete as last resort
+			await forceDeleteNoteMetadata(noteId);
+			await new Promise(resolve => setTimeout(resolve, 150));
 			await loadNotes();
-			// Clear current note if it was deleted
-			const $currentNote = get(currentNote);
-			if ($currentNote && $currentNote.id === noteId) {
-				currentNote.set(null);
+			
+			// Final check
+			const $notesMetadataAfterForce = get(notesMetadata);
+			const stillExists = $notesMetadataAfterForce.some(note => note.id === noteId);
+			if (stillExists) {
+				logger.error(`Note ${noteId} could not be deleted even with force delete`);
+				return false;
 			}
 		}
+		
+		// Clear current note if it was deleted
+		const $currentNote = get(currentNote);
+		if ($currentNote && $currentNote.id === noteId) {
+			currentNote.set(null);
+		}
+		
+		logger.debug(`Note ${noteId} deletion completed`);
 		return true;
 	} catch (error) {
 		logger.error('Error deleting note:', error);

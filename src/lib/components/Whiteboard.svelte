@@ -7,6 +7,10 @@
 	let isDrawing = false;
 	let lastX = 0;
 	let lastY = 0;
+	let mouseX = 0;
+	let mouseY = 0;
+	let isMouseOver = false;
+	let canvasRect = null;
 	export let currentTool = 'pen'; // 'pen', 'eraser', 'select'
 	export let currentColor = '#000000';
 	export let lineWidth = 2;
@@ -23,23 +27,58 @@
 	export function setLineWidth(width) {
 		lineWidth = width;
 	}
+	
+	export function clearCanvas() {
+		paths = [];
+		if (ctx) {
+			ctx.clearRect(0, 0, canvas.width / window.devicePixelRatio, canvas.height / window.devicePixelRatio);
+		}
+		saveWhiteboardData();
+	}
 	let autoSaveTimer = null;
 	
 	// Whiteboard data structure
 	let paths = [];
 	let currentPath = null;
+	let lastNoteId = null;
+	
+	let resizeObserver = null;
 	
 	onMount(() => {
 		if (canvas) {
 			ctx = canvas.getContext('2d');
 			initCanvas();
 			loadWhiteboardData();
+			if ($currentNote) {
+				lastNoteId = $currentNote.id;
+			}
+			
+			// Set up ResizeObserver for efficient resize handling
+			resizeObserver = new ResizeObserver(() => {
+				handleResize();
+			});
+			resizeObserver.observe(canvas);
 		}
+		
+		return () => {
+			if (resizeObserver) {
+				resizeObserver.disconnect();
+			}
+			if (resizeTimer) {
+				clearTimeout(resizeTimer);
+			}
+		};
 	});
 	
 	onDestroy(() => {
 		if (autoSaveTimer) {
 			clearTimeout(autoSaveTimer);
+		}
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+		}
+		if (resizeTimer) {
+			clearTimeout(resizeTimer);
 		}
 	});
 	
@@ -48,6 +87,7 @@
 		
 		// Set canvas size
 		const rect = canvas.getBoundingClientRect();
+		canvasRect = rect;
 		canvas.width = rect.width * window.devicePixelRatio;
 		canvas.height = rect.height * window.devicePixelRatio;
 		ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
@@ -65,6 +105,7 @@
 	function loadWhiteboardData() {
 		if (!$currentNote || !$currentNote.whiteboardData) {
 			paths = [];
+			redraw();
 			return;
 		}
 		
@@ -77,6 +118,24 @@
 		} catch (error) {
 			console.error('Error loading whiteboard data:', error);
 			paths = [];
+			redraw();
+		}
+	}
+	
+	// React to note changes - reload whiteboard data when note changes
+	$: if ($currentNote && canvas && ctx) {
+		// Note changed - load new note's whiteboard data
+		if (lastNoteId !== $currentNote.id) {
+			// Clear any pending auto-save timer when switching notes
+			// (The previous note's data should have been saved by saveWhiteboardData()
+			// when paths were modified, but we clear the timer to avoid saving to wrong note)
+			if (autoSaveTimer) {
+				clearTimeout(autoSaveTimer);
+				autoSaveTimer = null;
+			}
+			
+			lastNoteId = $currentNote.id;
+			loadWhiteboardData();
 		}
 	}
 	
@@ -107,12 +166,34 @@
 		ctx.globalCompositeOperation = 'source-over';
 	}
 	
+	function getCanvasRect() {
+		if (!canvasRect || !canvas) {
+			canvasRect = canvas.getBoundingClientRect();
+		}
+		return canvasRect;
+	}
+	
 	function getMousePos(e) {
-		const rect = canvas.getBoundingClientRect();
+		const rect = getCanvasRect();
 		return {
 			x: (e.clientX - rect.left) * (canvas.width / window.devicePixelRatio / rect.width),
 			y: (e.clientY - rect.top) * (canvas.height / window.devicePixelRatio / rect.height)
 		};
+	}
+	
+	function updateCursorPosition(e) {
+		if (!canvas) return;
+		const rect = getCanvasRect();
+		mouseX = e.clientX - rect.left;
+		mouseY = e.clientY - rect.top;
+	}
+	
+	function handleMouseEnter() {
+		isMouseOver = true;
+	}
+	
+	function handleMouseLeave() {
+		isMouseOver = false;
 	}
 	
 	function startDrawing(e) {
@@ -135,9 +216,18 @@
 		const pos = getMousePos(e);
 		
 		if (currentTool === 'pen' || currentTool === 'eraser') {
-			ctx.strokeStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : currentColor;
-			ctx.lineWidth = lineWidth;
-			ctx.globalCompositeOperation = currentTool === 'eraser' ? 'destination-out' : 'source-over';
+			// Only update styles if they changed
+			const strokeStyle = currentTool === 'eraser' ? 'rgba(0,0,0,1)' : currentColor;
+			if (ctx.strokeStyle !== strokeStyle) {
+				ctx.strokeStyle = strokeStyle;
+			}
+			if (ctx.lineWidth !== lineWidth) {
+				ctx.lineWidth = lineWidth;
+			}
+			const compositeOp = currentTool === 'eraser' ? 'destination-out' : 'source-over';
+			if (ctx.globalCompositeOperation !== compositeOp) {
+				ctx.globalCompositeOperation = compositeOp;
+			}
 			
 			ctx.beginPath();
 			ctx.moveTo(lastX, lastY);
@@ -181,40 +271,51 @@
 		}, 2000);
 	}
 	
-	function clearCanvas() {
-		if (confirm('Clear the entire whiteboard?')) {
-			paths = [];
-			if (ctx) {
-				ctx.clearRect(0, 0, canvas.width / window.devicePixelRatio, canvas.height / window.devicePixelRatio);
-			}
-			saveWhiteboardData();
-		}
-	}
 	
-	
-	// Handle window resize
+	// Handle window resize with debouncing
+	let resizeTimer = null;
 	function handleResize() {
-		initCanvas();
-		redraw();
+		if (resizeTimer) {
+			clearTimeout(resizeTimer);
+		}
+		resizeTimer = setTimeout(() => {
+			canvasRect = null; // Invalidate cache
+			initCanvas();
+			redraw();
+		}, 100);
 	}
 	
-	$: if (canvas) {
-		handleResize();
-	}
+	// Cursor size with minimum visibility
+	$: cursorSize = Math.max(lineWidth, 4);
 </script>
 
 <div class="whiteboard-container">
 	<canvas
 		bind:this={canvas}
 		class="whiteboard-canvas"
+		class:pen-cursor={currentTool === 'pen' && isMouseOver}
+		class:eraser-cursor={currentTool === 'eraser' && isMouseOver}
 		on:mousedown={startDrawing}
-		on:mousemove={draw}
+		on:mousemove={(e) => { 
+			updateCursorPosition(e);
+			if (isDrawing) {
+				draw(e);
+			}
+		}}
 		on:mouseup={stopDrawing}
-		on:mouseleave={stopDrawing}
+		on:mouseleave={(e) => { handleMouseLeave(); stopDrawing(e); }}
+		on:mouseenter={handleMouseEnter}
 		on:touchstart={(e) => { e.preventDefault(); startDrawing(e.touches[0]); }}
 		on:touchmove={(e) => { e.preventDefault(); draw(e.touches[0]); }}
 		on:touchend={(e) => { e.preventDefault(); stopDrawing(); }}
 	></canvas>
+	{#if (currentTool === 'pen' || currentTool === 'eraser') && isMouseOver}
+		<div 
+			class="brush-cursor"
+			class:eraser={currentTool === 'eraser'}
+			style="left: {mouseX}px; top: {mouseY}px; width: {cursorSize}px; height: {cursorSize}px;"
+		></div>
+	{/if}
 </div>
 
 <style>
@@ -225,6 +326,7 @@
 		width: 100%;
 		background: var(--bg-primary);
 		position: relative;
+		overflow: hidden;
 	}
 	
 	.whiteboard-toolbar {
@@ -305,6 +407,35 @@
 		background-image: radial-gradient(circle, var(--border-color) 1px, transparent 1px);
 		background-size: 20px 20px;
 		background-position: 0 0;
+		will-change: contents;
+		image-rendering: -webkit-optimize-contrast;
+		image-rendering: crisp-edges;
+	}
+	
+	.whiteboard-canvas.pen-cursor,
+	.whiteboard-canvas.eraser-cursor {
+		cursor: none;
+	}
+	
+	.brush-cursor {
+		position: absolute;
+		pointer-events: none;
+		border-radius: 50%;
+		border: 1.5px solid var(--text-primary);
+		background: transparent;
+		box-sizing: border-box;
+		z-index: 1000;
+		transform: translate(-50%, -50%);
+		mix-blend-mode: difference;
+		opacity: 0.8;
+		will-change: transform, left, top;
+	}
+	
+	.brush-cursor.eraser {
+		border-color: var(--text-primary);
+		background: rgba(255, 255, 255, 0.2);
+		border-style: dashed;
+		mix-blend-mode: normal;
 	}
 </style>
 

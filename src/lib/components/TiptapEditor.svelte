@@ -734,8 +734,10 @@ import TurndownService from 'turndown';
 								}}
 								title="Eraser"
 							>
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z"></path>
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path>
+									<path d="M18 8l-6 6"></path>
+									<path d="M12 8l-6 6"></path>
 								</svg>
 							</button>
 							
@@ -907,11 +909,32 @@ import TurndownService from 'turndown';
 	.whiteboard-toolbar-content .whiteboard-color-input {
 		width: 32px;
 		height: 32px;
+		min-width: 32px;
+		min-height: 32px;
+		max-width: 32px;
+		max-height: 32px;
+		aspect-ratio: 1;
 		border: 1px solid var(--border-color);
 		border-radius: var(--radius-sm);
 		cursor: pointer;
 		padding: 0;
+		margin: 0;
 		background: transparent;
+		box-sizing: border-box;
+		flex-shrink: 0;
+		-webkit-appearance: none;
+		appearance: none;
+	}
+	
+	.whiteboard-toolbar-content .whiteboard-color-input::-webkit-color-swatch-wrapper {
+		padding: 0;
+		border: none;
+		border-radius: var(--radius-sm);
+	}
+	
+	.whiteboard-toolbar-content .whiteboard-color-input::-webkit-color-swatch {
+		border: none;
+		border-radius: var(--radius-sm);
 	}
 	
 	.whiteboard-toolbar-content .whiteboard-width-control {

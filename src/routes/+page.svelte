@@ -67,6 +67,10 @@
 	
 	$: if ($currentNote && !editingTitle) {
 		titleInput = $currentNote.title || $currentNote.extractTitle();
+	}
+	
+	// Update selectedColor when note color changes (reacts to $currentNote.color changes)
+	$: if ($currentNote && !showColorDialog) {
 		selectedColor = $currentNote.color || null;
 	}
 	
@@ -269,8 +273,12 @@
 			return;
 		}
 
-		if (exportPassword.length < 6) {
-			exportPasswordError = 'Password must be at least 6 characters long';
+		// Validate password strength (same as bulk export)
+		const { validatePasswordStrength } = await import('../lib/utils/passwordStrength.js');
+		const validation = validatePasswordStrength(exportPassword, { minScore: 40, minLength: 8 });
+		
+		if (!validation.valid) {
+			exportPasswordError = validation.error || 'Password does not meet strength requirements';
 			return;
 		}
 
@@ -281,6 +289,7 @@
 
 		try {
 			const { encryptForStorage, deriveMasterKey, generateSalt } = await import('../lib/crypto/encryption.js');
+			const { signBackup } = await import('../lib/utils/backupIntegrity.js');
 
 			// Generate random salt per export (SECURITY: prevents rainbow table attacks)
 			const exportSalt = generateSalt();
@@ -299,13 +308,16 @@
 			// Encrypt the entire export
 			const encryptedData = await encryptForStorage(exportData, exportKey);
 
-			const finalData = {
+			let finalData = {
 				version: '1.0',
 				type: 'protected-note',
 				exportedAt: new Date().toISOString(),
 				salt: exportSalt, // Store salt in backup file (secure - salt can be public)
 				encryptedData: encryptedData
 			};
+
+			// Add HMAC signature for integrity verification (SECURITY: prevents tampering)
+			finalData = await signBackup(finalData, exportKey);
 
 			const jsonString = JSON.stringify(finalData, null, 2);
 			const safeTitle = $currentNote.extractTitle()
@@ -315,8 +327,9 @@
 
 			await exportFile(jsonString, filename);
 			
-			// Clear password from memory
+			// Clear password from memory (best effort - JavaScript strings are immutable)
 			exportPassword = '';
+			// Note: actualPassword will be garbage collected after function ends
 			
 			showExportResult(
 				`Note exported successfully!\n\nFile: ${filename}\n\nRemember your password - you'll need it to open this file.`,
@@ -475,6 +488,15 @@
 						{/if}
 					</button>
 					
+					<!-- Export Button -->
+					<button
+						class="header-btn export-btn"
+						on:click={exportProtectedNote}
+						title="Export note"
+					>
+						<Icon name="upload" size={16} />
+					</button>
+					
 					<!-- Delete Button -->
 					<button
 						class="header-btn delete-btn"
@@ -551,7 +573,8 @@
 					Enter a password to protect this note:
 				</p>
 				<ul class="dialog-hints">
-					<li>Minimum 6 characters</li>
+					<li>Minimum 8 characters</li>
+					<li>Use uppercase, lowercase, numbers, and special characters</li>
 					<li>Use a strong, memorable password</li>
 					<li>You'll need this password to open the file later</li>
 				</ul>

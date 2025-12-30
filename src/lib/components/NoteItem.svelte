@@ -18,6 +18,11 @@
 	let selectedColor = note.color || null;
 	let isDragging = false;
 	
+	// Update selectedColor when note.color changes (for reactivity)
+	$: if (note && !showColorDialog) {
+		selectedColor = note.color || null;
+	}
+	
 	// Available colors for notes
 	const noteColors = [
 		{ value: null, label: 'No color', hex: 'transparent' },

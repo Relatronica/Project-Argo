@@ -260,15 +260,77 @@ export async function getAllNotesMetadata() {
  */
 export async function deleteNoteMetadata(noteId) {
 	const database = await getDB();
-	const transaction = database.transaction([STORE_NAME], 'readwrite');
-	const store = transaction.objectStore(STORE_NAME);
-
+	
 	return new Promise((resolve, reject) => {
+		const transaction = database.transaction([STORE_NAME], 'readwrite');
+		const store = transaction.objectStore(STORE_NAME);
+
+		// Handle transaction errors
+		transaction.onerror = () => {
+			logger.error('Transaction error while deleting note:', transaction.error);
+			reject(transaction.error);
+		};
+
+		// Handle transaction completion
+		transaction.oncomplete = () => {
+			logger.debug(`Note ${noteId} deleted successfully`);
+			resolve();
+		};
+
+		// Handle delete request
 		const request = store.delete(noteId);
 
-		request.onsuccess = () => resolve();
-		request.onerror = () => reject(request.error);
+		request.onsuccess = () => {
+			// Request succeeded, but wait for transaction to complete
+			logger.debug(`Delete request successful for note ${noteId}`);
+		};
+
+		request.onerror = () => {
+			logger.error(`Error deleting note ${noteId}:`, request.error);
+			reject(request.error);
+		};
 	});
+}
+
+/**
+ * Force delete note metadata (bypasses normal checks)
+ * This is a more aggressive deletion that ensures the note is removed
+ * @param {string} noteId - Note identifier
+ */
+export async function forceDeleteNoteMetadata(noteId) {
+	const database = await getDB();
+	
+	// Try multiple times to ensure deletion
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			await deleteNoteMetadata(noteId);
+			
+			// Verify deletion
+			const metadata = await getNoteMetadata(noteId);
+			if (!metadata) {
+				logger.debug(`Note ${noteId} successfully deleted on attempt ${attempt + 1}`);
+				return;
+			}
+			
+			if (attempt < 2) {
+				logger.warn(`Note ${noteId} still exists after deletion, retrying...`);
+				await new Promise(resolve => setTimeout(resolve, 200));
+			}
+		} catch (error) {
+			if (attempt === 2) {
+				logger.error(`Failed to delete note ${noteId} after 3 attempts:`, error);
+				throw error;
+			}
+			await new Promise(resolve => setTimeout(resolve, 200));
+		}
+	}
+	
+	// Final verification
+	const metadata = await getNoteMetadata(noteId);
+	if (metadata) {
+		logger.error(`Note ${noteId} still exists after force deletion`);
+		throw new Error(`Failed to delete note ${noteId}`);
+	}
 }
 
 /**
