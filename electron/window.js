@@ -114,6 +114,8 @@ export async function createWindow() {
 
 	// Show window when ready to prevent visual flash
 	mainWindow.once('ready-to-show', () => {
+		// Maximize window to fill screen (but not fullscreen mode)
+		mainWindow.maximize();
 		mainWindow.show();
 
 		// Open DevTools in development

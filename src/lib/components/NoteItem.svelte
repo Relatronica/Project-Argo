@@ -47,6 +47,8 @@
 	
 	async function handleSaveColor() {
 		await updateNoteColor(note.id, selectedColor);
+		// Automatically select the note to show the color change in the header
+		onSelectNote(note);
 		showColorDialog = false;
 	}
 

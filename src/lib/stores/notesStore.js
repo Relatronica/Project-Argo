@@ -273,8 +273,8 @@ export async function updateNoteColor(noteId, color) {
 		const $notesMetadata = get(notesMetadata);
 		
 		// Find the note
-		const noteMetadata = $notesMetadata.find(n => n.id === noteId);
-		if (!noteMetadata) {
+		const existingMetadata = $notesMetadata.find(n => n.id === noteId);
+		if (!existingMetadata) {
 			logger.error('Note not found in metadata:', noteId);
 			return false;
 		}
@@ -340,12 +340,15 @@ export async function updateNoteColor(noteId, color) {
 		});
 		
 		notesMetadata.set(updatedMetadata);
-		
+
 		// Update current note if it's the one being updated
 		if ($currentNote && $currentNote.id === noteId) {
-			currentNote.set(note);
+			// Create a shallow copy to ensure Svelte detects the color change
+			currentNote.set({...note});
+			// Update metadata for real-time color updates in the UI
+			updateCurrentNoteMetadata();
 		}
-		
+
 		return true;
 	} catch (error) {
 		// Log error with full details before sanitization
