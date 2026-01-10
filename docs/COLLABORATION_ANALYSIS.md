@@ -516,3 +516,7 @@ class CollaborativeNote {
 *Versione: 1.0*
 *Focus: Collaborazione multi-utente privacy-first*
 
+
+
+
+

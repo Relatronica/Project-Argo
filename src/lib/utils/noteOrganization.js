@@ -19,17 +19,20 @@ export function sortNotes(notes, sortBy, sortOrder) {
 			
 		case 'favorites':
 			sorted.sort((a, b) => {
-				// Favorites first, then by date
+				// Favorites first, then by creation date
 				if (a.favorite && !b.favorite) return -1;
 				if (!a.favorite && b.favorite) return 1;
-				return new Date(b.updated) - new Date(a.updated);
+				// Use 'created' instead of 'updated' to maintain order when saving notes
+				return new Date(b.created) - new Date(a.created);
 			});
 			break;
 			
 		case 'date':
 		default:
+			// Use 'created' instead of 'updated' to maintain order when saving notes
+			// This prevents notes from jumping to the top when saved
 			sorted.sort((a, b) => {
-				return new Date(b.updated) - new Date(a.updated);
+				return new Date(b.created) - new Date(a.created);
 			});
 			break;
 	}

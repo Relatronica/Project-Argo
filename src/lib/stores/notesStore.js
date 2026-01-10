@@ -101,6 +101,9 @@ export async function loadNotes() {
  */
 export function createNewNote() {
 	const note = new Note();
+	// Ensure the new note has empty content
+	note.content = '';
+	note.title = '';
 	currentNote.set(note);
 	return note;
 }
@@ -119,9 +122,7 @@ export async function loadNoteById(noteId) {
 		}
 
 		const note = await Note.load(noteId, $masterKey, decryptNote);
-		if (note) {
-			currentNote.set(note);
-		}
+		// Don't automatically set currentNote here - let the caller decide
 		return note;
 	} catch (error) {
 		logger.error('Error loading note:', error);
@@ -157,6 +158,12 @@ export async function saveCurrentNote() {
 		await $currentNote.save($masterKey, encryptNote);
 		// Reload notes list
 		await loadNotes();
+
+		// Reload the current note to ensure it has the latest data
+		const reloadedNote = await loadNoteById($currentNote.id);
+		if (reloadedNote) {
+			currentNote.set(reloadedNote);
+		}
 
 		// Reset dirty state since changes have been saved
 		hasUnsavedChanges.set(false);
@@ -332,14 +339,29 @@ export async function updateNoteColor(noteId, color) {
 			throw saveError;
 		}
 		
-		// Update metadata in store - use getMetadata() to ensure all properties are included
-		const noteMetadata = note.getMetadata();
+		// Update metadata in store - build manually to ensure color is correct
 		const updatedMetadata = $notesMetadata.map(n => {
 			if (n.id === noteId) {
-				// Return new object with all metadata from note.getMetadata()
-				// This ensures color and all other properties are up to date
+				// Build metadata manually with updated color
 				return {
-					...noteMetadata
+					id: note.id,
+					title: note.title || note.extractTitle(),
+					content: note.content,
+					tags: note.tags,
+					folder: note.folder,
+					created: note.created,
+					updated: note.updated,
+					scheduledFor: note.scheduledFor,
+					dueDate: note.dueDate,
+					encrypted: note.encrypted,
+					favorite: note.favorite,
+					color: color, // Use the new color directly
+					mode: note.mode,
+					whiteboardData: note.encrypted ? null : note.whiteboardData,
+					whiteboardCiphertext: note.encrypted ? note.whiteboardCiphertext : undefined,
+					whiteboardNonce: note.encrypted ? note.whiteboardNonce : undefined,
+					contentLength: note.content.length,
+					lastModified: note.updated
 				};
 			}
 			return n;
@@ -349,10 +371,11 @@ export async function updateNoteColor(noteId, color) {
 
 		// Update current note if it's the one being updated
 		if ($currentNote && $currentNote.id === noteId) {
-			// Create a shallow copy to ensure Svelte detects the color change
-			currentNote.set({...note});
-			// Update metadata for real-time color updates in the UI
-			updateCurrentNoteMetadata();
+			// Update the existing note instance to preserve methods
+			Object.assign($currentNote, note);
+			// Trigger reactivity by setting the store
+			currentNote.set($currentNote);
+			// Note: updateCurrentNoteMetadata() is not needed here since metadata is already updated above
 		}
 
 		return true;

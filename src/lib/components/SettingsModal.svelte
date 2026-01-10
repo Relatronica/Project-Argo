@@ -3,14 +3,16 @@
 	import { isDarkTheme, toggleTheme } from '../stores/themeStore.js';
 	import Icon from './Icon.svelte';
 	import ExportImport from './ExportImport.svelte';
+	import NotificationSettings from './NotificationSettings.svelte';
 	
 	let showModal = false;
-	let activeSection = 'appearance'; // 'appearance' | 'view' | 'organization' | 'backup'
+	let activeSection = 'appearance'; // 'appearance' | 'view' | 'organization' | 'backup' | 'notifications'
 	
 	const settingsSections = [
 		{ id: 'appearance', label: 'Appearance', icon: 'palette' },
 		{ id: 'view', label: 'View', icon: 'list' },
 		{ id: 'organization', label: 'Organization', icon: 'settings' },
+		{ id: 'notifications', label: 'Notifications', icon: 'bell' },
 		{ id: 'backup', label: 'Backup', icon: 'package' }
 	];
 	
@@ -150,16 +152,17 @@
 									<div class="setting-item">
 										<div class="setting-info">
 											<label class="setting-label">Sort By</label>
-											<p class="setting-description">Choose how notes should be sorted</p>
+											<p class="setting-description">Choose how notes should be sorted. Date sorting uses creation date to keep notes in place when saved.</p>
 										</div>
 										<div class="setting-controls">
 											<button 
 												class="option-btn"
 												class:active={$organizationPreferences.sortBy === 'date'}
 												on:click={() => setSortBy('date')}
+												title="Sort by creation date (notes stay in place when saved)"
 											>
 												<Icon name="calendar" size={16} />
-												<span>Date</span>
+												<span>Creation Date</span>
 											</button>
 											<button 
 												class="option-btn"
@@ -184,7 +187,7 @@
 									<div class="setting-item">
 										<div class="setting-info">
 											<label class="setting-label">Sort Order</label>
-											<p class="setting-description">Choose the order direction</p>
+											<p class="setting-description">Choose the order direction. When sorting by date, this refers to creation date.</p>
 										</div>
 										<div class="setting-controls">
 											<button 
@@ -210,7 +213,7 @@
 									<div class="setting-item">
 										<div class="setting-info">
 											<label class="setting-label">Group By</label>
-											<p class="setting-description">Choose how notes should be grouped</p>
+											<p class="setting-description">Choose how notes should be grouped. Date grouping uses last updated date to show recently modified notes.</p>
 										</div>
 										<div class="setting-controls">
 											<button 
@@ -224,9 +227,10 @@
 												class="option-btn"
 												class:active={$organizationPreferences.groupBy === 'date'}
 												on:click={() => setGroupBy('date')}
+												title="Group by last updated date (Today, This Week, This Month, Older)"
 											>
 												<Icon name="calendar" size={16} />
-												<span>Date</span>
+												<span>Update Date</span>
 											</button>
 											<button 
 												class="option-btn"
@@ -262,6 +266,12 @@
 											<span class="toggle-slider"></span>
 										</label>
 									</div>
+								</div>
+							</div>
+						{:else if activeSection === 'notifications'}
+							<div class="settings-panel">
+								<div class="panel-content">
+									<NotificationSettings />
 								</div>
 							</div>
 						{:else if activeSection === 'backup'}

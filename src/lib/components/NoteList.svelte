@@ -145,7 +145,10 @@
 	}
 
 	async function selectNote(note) {
-		await loadNoteById(note.id);
+		const loadedNote = await loadNoteById(note.id);
+		if (loadedNote) {
+			currentNote.set(loadedNote);
+		}
 	}
 
 	function handleNewNote() {
@@ -246,7 +249,7 @@
 					on:dragleave={handleRootDragLeave}
 					on:drop={handleRootDrop}
 				>
-					{#each rootNotes as note (note.id)}
+					{#each rootNotes as note (`${note.id}-${note.color || 'none'}`)}
 						<NoteItem
 							{note}
 							{selectedId}
@@ -343,7 +346,7 @@
 			<!-- Show root notes directly (not in a folder) -->
 			{#if rootNotes.length > 0}
 				<div class="root-notes">
-					{#each rootNotes as note (note.id)}
+					{#each rootNotes as note (`${note.id}-${note.color || 'none'}`)}
 						<NoteItem
 							{note}
 							{selectedId}
@@ -465,8 +468,29 @@
 	
 	.notes {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
+		overflow-x: hidden;
 		padding: 0.5rem;
+		scroll-behavior: smooth;
+	}
+
+	/* Custom scrollbar styling for better UX */
+	.notes::-webkit-scrollbar {
+		width: 8px;
+	}
+
+	.notes::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	.notes::-webkit-scrollbar-thumb {
+		background: var(--border-color, rgba(255, 255, 255, 0.1));
+		border-radius: 4px;
+	}
+
+	.notes::-webkit-scrollbar-thumb:hover {
+		background: var(--text-muted, rgba(255, 255, 255, 0.2));
 	}
 	
 	.root-notes {

@@ -19,7 +19,7 @@
 	let isDragging = false;
 	
 	// Update selectedColor when note.color changes (for reactivity)
-	$: if (note && !showColorDialog) {
+	$: if (note) {
 		selectedColor = note.color || null;
 	}
 	

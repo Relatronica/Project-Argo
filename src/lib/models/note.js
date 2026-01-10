@@ -15,6 +15,8 @@ export class Note {
 		this.folder = data.folder || null; // Folder path (e.g., "Work/Projects" or null for root)
 		this.created = data.created || new Date().toISOString();
 		this.updated = data.updated || new Date().toISOString();
+		this.scheduledFor = data.scheduledFor || null; // Date when user plans to work on this note
+		this.dueDate = data.dueDate || null; // Deadline/due date for this note
 		this.encrypted = data.encrypted !== undefined ? data.encrypted : false; // Default to false for new notes
 		this.favorite = data.favorite !== undefined ? data.favorite : false; // Default to false for new notes
 		this.color = data.color || null; // Color for note (hex color code or null)
@@ -86,6 +88,8 @@ export class Note {
 			folder: this.folder,
 			created: this.created,
 			updated: this.updated,
+			scheduledFor: this.scheduledFor, // Store scheduled date
+			dueDate: this.dueDate, // Store due date
 			encrypted: this.encrypted,
 			favorite: this.favorite,
 			color: this.color, // Store note color
