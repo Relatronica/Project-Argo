@@ -1,4 +1,6 @@
 <script>
+	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 	import { organizationPreferences, toggleCompactView, setSortBy, setSortOrder, setGroupBy, toggleShowFavoritesFirst } from '../stores/organizationStore.js';
 	import { isDarkTheme, toggleTheme } from '../stores/themeStore.js';
 	import Icon from './Icon.svelte';
@@ -7,6 +9,7 @@
 	
 	let showModal = false;
 	let activeSection = 'appearance'; // 'appearance' | 'view' | 'organization' | 'backup' | 'notifications'
+	let modalElement;
 	
 	const settingsSections = [
 		{ id: 'appearance', label: 'Appearance', icon: 'palette' },
@@ -34,6 +37,21 @@
 	function setActiveSection(sectionId) {
 		activeSection = sectionId;
 	}
+
+	// Portal action to append modal to body
+	function portal(node) {
+		if (!browser) return;
+		
+		document.body.appendChild(node);
+		
+		return {
+			destroy() {
+				if (node.parentNode) {
+					node.parentNode.removeChild(node);
+				}
+			}
+		};
+	}
 </script>
 
 <!-- Settings button (to be placed at bottom of sidebar) -->
@@ -42,9 +60,9 @@
 	<span>Settings</span>
 </button>
 
-<!-- Modal -->
+<!-- Modal - Rendered in body to escape stacking context -->
 {#if showModal}
-	<div class="modal-overlay" on:click={handleClickOutside}>
+	<div class="modal-overlay" use:portal bind:this={modalElement} on:click={handleClickOutside}>
 		<div class="modal-content" on:click|stopPropagation>
 			<div class="modal-header">
 				<h3>
@@ -352,7 +370,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 1000;
+		z-index: 10000;
 		animation: fadeIn 0.2s ease;
 		padding: 1rem;
 	}

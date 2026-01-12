@@ -24,7 +24,8 @@
 		// Cmd/Ctrl + N: New note
 		if ((event.metaKey || event.ctrlKey) && event.key === 'n' && !isInput) {
 			event.preventDefault();
-			createNewNote();
+			// Fire and forget - don't await to avoid blocking the event handler
+			createNewNote().catch(err => logger.warn('Error creating new note:', err));
 			return;
 		}
 

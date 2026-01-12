@@ -101,14 +101,14 @@
 
 	async function handleCreateNoteFromCalendar(event) {
 		const { date } = event.detail;
-		// Create a new note
+		// Create a new note (this now saves automatically)
 		const { createNewNote, saveCurrentNote, currentNote } = await import('../../stores/notesStore.js');
-		const newNote = createNewNote();
+		const newNote = await createNewNote();
 		
 		// Set the scheduled date immediately
 		newNote.scheduledFor = `${date}T00:00:00.000Z`;
 		
-		// Save the note immediately so it appears in the sidebar
+		// Save again to persist the scheduled date (createNewNote already saved, but we need to save the scheduled date)
 		await saveCurrentNote();
 	}
 

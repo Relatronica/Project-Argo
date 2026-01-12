@@ -5,6 +5,7 @@
 	import { expandedFolders, toggleFolder, initializeFolders } from '../stores/folderExpansionStore.js';
 	import { organizeNotes, sortNotes } from '../utils/noteOrganization.js';
 	import { extractNoteTitle, groupNotesByFolder } from '../utils/noteHelpers.js';
+	import { get } from 'svelte/store';
 	import NoteItem from './NoteItem.svelte';
 	import FolderGroup from './FolderGroup.svelte';
 	import MoveMenu from './MoveMenu.svelte';
@@ -144,15 +145,75 @@
 		}
 	}
 
+	// Track loading state to prevent race conditions when switching notes rapidly
+	let isLoadingNote = false;
+	let pendingNoteId = null;
+
 	async function selectNote(note) {
-		const loadedNote = await loadNoteById(note.id);
-		if (loadedNote) {
-			currentNote.set(loadedNote);
+		// If the same note is already selected, do nothing
+		const $currentNote = get(currentNote);
+		if ($currentNote && $currentNote.id === note.id) {
+			return;
+		}
+
+		const noteIdToLoad = note.id;
+		
+		// If we're already loading a note, just update pendingNoteId
+		// The current load will check if the note changed and handle it
+		if (isLoadingNote) {
+			console.log('[NoteList] Note selection in progress, queuing:', noteIdToLoad);
+			pendingNoteId = noteIdToLoad;
+			return;
+		}
+
+		// Start loading
+		isLoadingNote = true;
+		pendingNoteId = noteIdToLoad;
+		
+		try {
+			const loadedNote = await loadNoteById(noteIdToLoad);
+			
+			// Check if user selected a different note while we were loading
+			if (pendingNoteId !== noteIdToLoad && pendingNoteId) {
+				console.log('[NoteList] Note changed during load, processing pending:', pendingNoteId);
+				// Load the pending note instead (we need to find it in the metadata)
+				const $notesMetadata = get(notesMetadata);
+				const pendingNote = $notesMetadata.find(n => n.id === pendingNoteId);
+				if (pendingNote) {
+					// Reset state and load the pending note
+					isLoadingNote = false;
+					const pendingId = pendingNoteId;
+					pendingNoteId = null;
+					// Load the pending note
+					try {
+						const pendingLoadedNote = await loadNoteById(pendingId);
+						if (pendingLoadedNote) {
+							currentNote.set(pendingLoadedNote);
+						}
+					} catch (error) {
+						console.error('[NoteList] Error loading pending note:', error);
+					}
+				}
+				return;
+			}
+			
+			// Load completed successfully, set the note
+			if (loadedNote) {
+				currentNote.set(loadedNote);
+			}
+		} catch (error) {
+			console.error('[NoteList] Error loading note:', error);
+		} finally {
+			// Only clear loading state if this is still the current request
+			if (pendingNoteId === noteIdToLoad) {
+				isLoadingNote = false;
+				pendingNoteId = null;
+			}
 		}
 	}
 
-	function handleNewNote() {
-		createNewNote();
+	async function handleNewNote() {
+		await createNewNote();
 		selectedId = null;
 	}
 	

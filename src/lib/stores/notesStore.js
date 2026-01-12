@@ -98,13 +98,36 @@ export async function loadNotes() {
 
 /**
  * Create new note
+ * Saves the note immediately to ensure it has persistent state and prevent data inheritance issues
  */
-export function createNewNote() {
+export async function createNewNote() {
 	const note = new Note();
-	// Ensure the new note has empty content
+	// Ensure the new note has empty content and no whiteboard data
 	note.content = '';
 	note.title = '';
+	note.whiteboardData = null; // Explicitly set to null to prevent inheriting data from previous note
 	currentNote.set(note);
+	
+	// Save immediately to ensure the note has persistent state and prevent whiteboard data inheritance
+	// This also ensures the note appears in the sidebar
+	try {
+		const $masterKey = get(masterKey);
+		let encryptNote = null;
+		if ($masterKey) {
+			const cryptoModule = await loadCrypto();
+			encryptNote = cryptoModule.encryptNote;
+		}
+		await note.save($masterKey || undefined, encryptNote);
+		// Reload notes list to update metadata
+		await loadNotes();
+		// Update current note with the saved version to ensure it has all metadata
+		currentNote.set(note);
+	} catch (error) {
+		// Log error but don't fail - the note is still created in memory
+		// User can still work with it and save it later
+		logger.warn('Error saving new note immediately:', error);
+	}
+	
 	return note;
 }
 
@@ -210,7 +233,8 @@ export function updateCurrentNoteMetadata() {
 				contentLength: $currentNote.content.length,
 				updated: $currentNote.updated,
 				favorite: $currentNote.favorite,
-				color: $currentNote.color
+				color: $currentNote.color,
+				icon: $currentNote.icon
 			};
 		}
 		return note;
@@ -356,6 +380,7 @@ export async function updateNoteColor(noteId, color) {
 					encrypted: note.encrypted,
 					favorite: note.favorite,
 					color: color, // Use the new color directly
+					icon: note.icon,
 					mode: note.mode,
 					whiteboardData: note.encrypted ? null : note.whiteboardData,
 					whiteboardCiphertext: note.encrypted ? note.whiteboardCiphertext : undefined,
@@ -391,6 +416,96 @@ export async function updateNoteColor(noteId, color) {
 		console.error('[ERROR] Error updating note color - details:', errorDetails);
 		logger.error('Error updating note color:', error);
 		logger.error('Error details:', errorDetails);
+		return false;
+	}
+}
+
+/**
+ * Update note icon
+ */
+export async function updateNoteIcon(noteId, icon) {
+	try {
+		const $currentNote = get(currentNote);
+		const $notesMetadata = get(notesMetadata);
+		
+		// Find the note
+		const existingMetadata = $notesMetadata.find(n => n.id === noteId);
+		if (!existingMetadata) {
+			logger.error('Note not found in metadata:', noteId);
+			return false;
+		}
+		
+		// Load the full note if not already loaded
+		let note = null;
+		if ($currentNote && $currentNote.id === noteId) {
+			note = $currentNote;
+		} else {
+			note = await loadNoteById(noteId);
+		}
+		
+		if (!note) {
+			logger.error('Failed to load note:', noteId);
+			return false;
+		}
+		
+		// Update icon
+		note.icon = icon;
+		note.updated = new Date().toISOString();
+		
+		// Save the note
+		const $masterKey = get(masterKey);
+		let encryptNote = null;
+		if ($masterKey) {
+			try {
+				// Verify masterKey is a Uint8Array
+				if (!($masterKey instanceof Uint8Array)) {
+					logger.warn('masterKey is not a Uint8Array, saving note unencrypted');
+					encryptNote = null;
+				} else {
+					const cryptoModule = await loadCrypto();
+					encryptNote = cryptoModule?.encryptNote;
+					if (!encryptNote || typeof encryptNote !== 'function') {
+						logger.warn('encryptNote is not available or not a function, saving note unencrypted');
+						encryptNote = null;
+					}
+				}
+			} catch (cryptoError) {
+				logger.warn('Failed to load crypto module, saving note unencrypted:', cryptoError);
+				encryptNote = null;
+			}
+		}
+		
+		try {
+			await note.save($masterKey, encryptNote);
+		} catch (saveError) {
+			logger.error('Failed to save note:', saveError);
+			throw saveError;
+		}
+		
+		// Update metadata in store
+		const updatedMetadata = $notesMetadata.map(n => {
+			if (n.id === noteId) {
+				return {
+					...n,
+					icon: icon,
+					updated: note.updated,
+					lastModified: note.updated
+				};
+			}
+			return n;
+		});
+		
+		notesMetadata.set(updatedMetadata);
+
+		// Update current note if it's the one being updated
+		if ($currentNote && $currentNote.id === noteId) {
+			Object.assign($currentNote, note);
+			currentNote.set($currentNote);
+		}
+
+		return true;
+	} catch (error) {
+		logger.error('Error updating note icon:', error);
 		return false;
 	}
 }

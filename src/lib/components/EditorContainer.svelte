@@ -1,6 +1,6 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
-	import { hasUnsavedChanges, currentNote, masterKey } from '../stores/notesStore.js';
+	import { onDestroy } from 'svelte';
+	import { hasUnsavedChanges, currentNote, masterKey, saveStatus } from '../stores/notesStore.js';
 	import { get } from 'svelte/store';
 	import TextEditor from './editor/TextEditor.svelte';
 	import WhiteboardLayout from './editor/WhiteboardLayout.svelte';
@@ -22,6 +22,20 @@
 	function handleContentChange(content) {
 		if (!note) return;
 
+		// CRITICAL: Don't process content changes if we're processing a note change
+		// This prevents data from being written to the wrong note during rapid note switching
+		if (isProcessingNoteChange) {
+			console.log('[EditorContainer] Ignoring content change during note change processing');
+			return;
+		}
+
+		// CRITICAL: Only process content changes if note.id matches currentNoteId
+		// This prevents data from being written to the wrong note during rapid note switching
+		if (note.id !== currentNoteId) {
+			console.log('[EditorContainer] Ignoring content change for note', note.id, 'current note is', currentNoteId);
+			return;
+		}
+
 		// If content is whiteboardData (stringified JSON), update note.whiteboardData
 		// Otherwise, update note.content for text editor
 		if (typeof content === 'string' && (content.startsWith('{"paths":') || content.trim() === '{"paths":[]}')) {
@@ -35,20 +49,13 @@
 			note.content = content;
 		}
 
-		// ALWAYS update previousNoteData with latest data for the CURRENT note
-		// IMPORTANT: Only update if note.id matches currentNoteId to avoid updating with wrong note's data
-		// This ensures we have the latest data when note changes
+		// Update previousNoteData with latest data for the CURRENT note
+		// Only update if note.id matches currentNoteId to avoid updating with wrong note's data
 		if (note.id === currentNoteId) {
 			previousNoteData = {
 				whiteboardData: note.whiteboardData,
 				content: note.content
 			};
-			console.log('[EditorContainer] Updated previousNoteData for note:', note.id, {
-				whiteboardDataLength: previousNoteData.whiteboardData?.length || 0,
-				contentLength: previousNoteData.content?.length || 0
-			});
-		} else {
-			console.warn('[EditorContainer] handleContentChange called for note:', note.id, 'but currentNoteId is:', currentNoteId, '- ignoring update');
 		}
 
 		// Mark as having unsaved changes and start auto-save timer only if editor is ready
@@ -75,27 +82,20 @@
 		}
 	}
 
-	// Selection update handler
+	// Selection update handler (currently unused but kept for future use)
 	function handleSelectionUpdate() {
 		// Handle selection updates if needed
 	}
 
-	// Editor ready handler - when editor is ready, sync previousNoteData with current note's data
+	// Editor ready handler - sync previousNoteData with current note's data
 	function handleEditorReady() {
 		editorReady = true;
-		// When editor is ready, sync previousNoteData with current note's data
-		// This ensures we have valid data for saving when note changes
-		// The editor has loaded all data (including whiteboard) at this point
-		// IMPORTANT: Update previousNoteData to reflect the loaded data
+		// Sync previousNoteData when editor is ready to ensure we have valid data for saving
 		if (note && note.id === currentNoteId) {
 			previousNoteData = {
 				whiteboardData: note.whiteboardData,
 				content: note.content
 			};
-			console.log('[EditorContainer] Editor ready, synced previousNoteData for note:', note.id, {
-				hasWhiteboardData: !!previousNoteData.whiteboardData,
-				hasContent: !!previousNoteData.content
-			});
 		}
 	}
 
@@ -118,8 +118,6 @@
 		try {
 			const { loadNoteById, loadNotes } = await import('../stores/notesStore.js');
 			
-			console.log('[EditorContainer] Saving pending changes for note:', previousNoteId);
-			
 			// Load the previous note from storage
 			const previousNote = await loadNoteById(previousNoteId);
 			if (!previousNote) {
@@ -127,16 +125,14 @@
 				return;
 			}
 			
-			// Update the loaded note with latest data from memory (whiteboardData/content)
+			// Update the loaded note with latest data from memory
 			// This ensures we save the most recent data even if auto-save hasn't fired yet
 			if (latestData) {
 				if (latestData.whiteboardData !== undefined && latestData.whiteboardData !== null) {
 					previousNote.whiteboardData = latestData.whiteboardData;
-					console.log('[EditorContainer] Updating note with latest whiteboardData');
 				}
 				if (latestData.content !== undefined && latestData.content !== null) {
 					previousNote.content = latestData.content;
-					console.log('[EditorContainer] Updating note with latest content');
 				}
 			}
 			
@@ -159,9 +155,122 @@
 			await loadNotes();
 			
 			hasUnsavedChanges.set(false);
-			console.log('[EditorContainer] Pending changes saved successfully');
 		} catch (error) {
 			console.error('[EditorContainer] Error saving pending changes:', error);
+			throw error;
+		}
+	}
+
+	// Track if we're currently saving to prevent race conditions
+	let isSaving = false;
+	let savePromise = null;
+	
+	// Track pending note changes to handle rapid note switching
+	let pendingNoteChange = null;
+	let isProcessingNoteChange = false;
+
+	// Helper function to normalize whiteboard data
+	function normalizeWhiteboardData(whiteboardData) {
+		if (!whiteboardData) return null;
+		if (typeof whiteboardData !== 'string') return null;
+		const trimmed = whiteboardData.trim();
+		if (trimmed === '' || trimmed === '{}' || trimmed === '{"paths":[]}' || trimmed === '{"paths": []}') {
+			return null;
+		}
+		return whiteboardData;
+	}
+
+	// Async function to handle note/mode changes
+	async function handleNoteChange(newNoteId, newMode, noteChanged, modeChanged) {
+		// If we're already processing a note change, queue this one
+		if (isProcessingNoteChange) {
+			pendingNoteChange = { newNoteId, newMode, noteChanged, modeChanged };
+			console.log('[EditorContainer] Note change already in progress, queuing:', newNoteId);
+			return;
+		}
+
+		isProcessingNoteChange = true;
+
+		try {
+			// Wait for any save in progress to complete
+			if (savePromise) {
+				try {
+					await savePromise;
+				} catch (error) {
+					console.error('[EditorContainer] Error waiting for previous save:', error);
+				}
+			}
+
+			// Save any pending changes before switching notes
+			// NOTE: For mode changes, MainContent.handleModeToggle handles saving before mode change
+			// So we only save here when the note itself changes, not when just the mode changes
+			if (noteChanged && currentNoteId && previousNoteData) {
+				// CRITICAL: Create a snapshot of previousNoteData BEFORE updating it
+				// This prevents data from being overwritten if the user changes notes rapidly
+				const snapshotToSave = {
+					whiteboardData: previousNoteData.whiteboardData,
+					content: previousNoteData.content
+				};
+				
+				isSaving = true;
+				savePromise = (async () => {
+					try {
+						saveStatus.set('saving');
+						await savePendingChanges(currentNoteId, snapshotToSave);
+						
+						saveStatus.set('saved');
+						setTimeout(() => saveStatus.set('idle'), 1500);
+					} catch (error) {
+						console.error('[EditorContainer] Error saving previous note:', error);
+						saveStatus.set('error');
+						setTimeout(() => saveStatus.set('idle'), 3000);
+						throw error;
+					} finally {
+						isSaving = false;
+						savePromise = null;
+					}
+				})();
+				
+				await savePromise;
+			}
+
+			// Check if note changed while we were saving (user selected another note)
+			// In that case, skip this change and process the pending one
+			if (pendingNoteChange && pendingNoteChange.newNoteId !== newNoteId) {
+				console.log('[EditorContainer] Note changed during save, processing pending:', pendingNoteChange.newNoteId);
+				const pending = pendingNoteChange;
+				pendingNoteChange = null;
+				isProcessingNoteChange = false;
+				// Process the pending change
+				handleNoteChange(pending.newNoteId, pending.newMode, pending.noteChanged, pending.modeChanged);
+				return;
+			}
+
+			// Force re-initialization
+			editorReady = false;
+			
+			// Update tracking variables
+			currentNoteId = newNoteId;
+			currentMode = newMode;
+			
+			// Initialize previousNoteData with NEW note's data
+			// IMPORTANT: Don't normalize here - use note.whiteboardData as-is to preserve data
+			// Normalization should only happen when saving, not when loading
+			previousNoteData = {
+				whiteboardData: note.whiteboardData || null,
+				content: note.content || ''
+			};
+
+			currentEditor = newMode;
+		} finally {
+			isProcessingNoteChange = false;
+			
+			// Process any pending note change
+			if (pendingNoteChange) {
+				const pending = pendingNoteChange;
+				pendingNoteChange = null;
+				handleNoteChange(pending.newNoteId, pending.newMode, pending.noteChanged, pending.modeChanged);
+			}
 		}
 	}
 
@@ -175,61 +284,20 @@
 		const modeChanged = currentMode !== newMode;
 
 		if (noteChanged || modeChanged) {
-			console.log('[EditorContainer] Change detected:', {
-				noteChanged: noteChanged ? `${currentNoteId} → ${newNoteId}` : false,
-				modeChanged: modeChanged ? `${currentMode} → ${newMode}` : false
-			});
-
-			// Save any pending changes before switching
-			// IMPORTANT: Save the previous note using previousNoteData
-			// previousNoteData contains the latest whiteboardData/content for the CURRENT note (before it becomes previous)
-			if (noteChanged && currentNoteId) {
-				// Always try to save - use previousNoteData if available, otherwise log warning
-				if (previousNoteData) {
-					const whiteboardPreview = typeof previousNoteData.whiteboardData === 'string' 
-						? previousNoteData.whiteboardData.substring(0, 50) 
-						: previousNoteData.whiteboardData 
-							? JSON.stringify(previousNoteData.whiteboardData).substring(0, 50)
-							: 'null';
-					console.log('[EditorContainer] Saving previous note before switch:', currentNoteId, {
-						hasWhiteboardData: !!previousNoteData.whiteboardData,
-						hasContent: !!previousNoteData.content,
-						whiteboardDataPreview: whiteboardPreview
-					});
-					savePendingChanges(currentNoteId, previousNoteData);
-				} else {
-					console.warn('[EditorContainer] No previousNoteData to save for note:', currentNoteId, '- data may be lost!');
-				}
-			}
-			// For mode changes: MainContent.handleModeToggle() already saves before and after mode change
-			// So we skip saving here to avoid duplicate saves
-
-			// Force re-initialization
-			editorReady = false;
-			
-			// Update tracking variables FIRST (before initializing previousNoteData)
-			const previousNoteIdForSave = currentNoteId; // Save reference before updating
-			currentNoteId = newNoteId;
-			currentMode = newMode;
-			
-			// Initialize previousNoteData with NEW note's data immediately
-			// This will be updated by handleContentChange/handleEditorReady when data changes/loads
-			previousNoteData = {
-				whiteboardData: note.whiteboardData,
-				content: note.content
-			};
+			// Trigger async handling - this will await the save before proceeding
+			handleNoteChange(newNoteId, newMode, noteChanged, modeChanged);
 		} else if (currentNoteId === null) {
 			// First initialization
 			currentNoteId = newNoteId;
 			currentMode = newMode;
-			// Initialize previousNoteData with current note's data
+			// IMPORTANT: Don't normalize here - use note.whiteboardData as-is to preserve data
 			previousNoteData = {
-				whiteboardData: note.whiteboardData,
-				content: note.content
+				whiteboardData: note.whiteboardData || null,
+				content: note.content || ''
 			};
-		}
 
-		currentEditor = newMode;
+			currentEditor = newMode;
+		}
 	}
 
 	// Cleanup - save before destroying

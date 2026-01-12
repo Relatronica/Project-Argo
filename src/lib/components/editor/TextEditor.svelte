@@ -21,14 +21,16 @@
 	export let onSelectionUpdate;
 	export let onReady;
 	export let onEditorRef = null;
+	export let showBubbleMenu = true; // Allow disabling bubble menu
 
 	// Element refs
 	let editorElement;
 	let editor;
+	let toolbarContainer;
+	let toolbarRight = '50%'; // Position from right edge of viewport (only this changes)
 
 	// State
 	let isInTableState = false;
-	let showBubbleMenu = false;
 	let bubbleMenuPosition = { top: 0, left: 0 };
 	let bubbleMenuElement;
 
@@ -36,6 +38,14 @@
 	let showColorPicker = false;
 	let colorPickerElement;
 	let customColor = '#000000';
+
+	// Dropdown state
+	let showHeadingsDropdown = false;
+	let showAlignmentDropdown = false;
+	let showInsertDropdown = false;
+	let headingsDropdownElement;
+	let alignmentDropdownElement;
+	let insertDropdownElement;
 
 	// Link/Image modal state
 	let showLinkModal = false;
@@ -191,13 +201,33 @@
 	function setColor(color) { editor?.chain().focus().setColor(color).run(); }
 	function toggleColorPicker() {
 		showColorPicker = !showColorPicker;
-		if (showColorPicker) {
-			showBubbleMenu = false; // Chiudi il bubble menu quando apri il color picker
-		}
+		// Non chiudere il bubble menu quando apri il color picker
 	}
-	function applyColor(color) { setColor(color); customColor = color; showColorPicker = false; }
-	function applyCustomColor() { setColor(customColor); }
-	function resetColor() { editor?.chain().focus().unsetColor().run(); showColorPicker = false; }
+	function applyColor(color, event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		setColor(color);
+		customColor = color;
+		showColorPicker = false;
+	}
+	function applyCustomColor(event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		setColor(customColor);
+		showColorPicker = false;
+	}
+	function resetColor(event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		editor?.chain().focus().unsetColor().run();
+		showColorPicker = false;
+	}
 
 	function getCurrentColor() {
 		if (!editor) return null;
@@ -213,7 +243,7 @@
 
 	// Bubble menu
 	function updateBubbleMenu() {
-		if (!editor || !editorElement) {
+		if (!showBubbleMenu || !editor || !editorElement) {
 			showBubbleMenu = false;
 			return;
 		}
@@ -323,6 +353,11 @@
 		updateBubbleMenu();
 		onReady?.();
 		onEditorRef?.(editor);
+		
+		// Update toolbar position after editor is initialized
+		if (!showBubbleMenu) {
+			setTimeout(() => updateToolbarPosition(), 200);
+		}
 	}
 
 	// Reactive statements
@@ -337,24 +372,174 @@
 		lastNoteId = note.id;
 	}
 
-	$: if (editor && !$isDarkTheme !== (editor.getAttributes('editorProps')?.attributes?.class?.includes('dark'))) {
-		// Theme changed - update editor
-		const attrs = editor.getAttributes('editorProps');
-		if (attrs?.attributes) {
-			attrs.attributes.class = `editor-content ${$isDarkTheme ? 'dark' : 'light'}`;
+	// Update editor theme when it changes
+	$: if (editor && editor.view && editorElement) {
+		// Get the ProseMirror editor DOM element
+		const editorDOM = editor.view.dom;
+		if (editorDOM) {
+			// Remove old theme classes
+			editorDOM.classList.remove('dark', 'light');
+			// Add new theme class
+			editorDOM.classList.add($isDarkTheme ? 'dark' : 'light');
+			
+			// Also update any nested .editor-content elements as fallback
+			const editorContent = editorElement.querySelector('.editor-content');
+			if (editorContent && editorContent !== editorDOM) {
+				editorContent.classList.remove('dark', 'light');
+				editorContent.classList.add($isDarkTheme ? 'dark' : 'light');
+			}
+		}
+	}
+
+	let isInitialized = false;
+	
+	// Update toolbar position - always uses fixed positioning, just moves horizontally
+	// Toolbar is always visible, only position changes
+	$: if (toolbarContainer && !showBubbleMenu) {
+		if (!isInitialized) {
+			// First initialization: calculate position
+			updateToolbarPosition();
+			isInitialized = true;
+		} else {
+			// Update position smoothly (CSS transition handles the horizontal animation)
+			updateToolbarPosition();
 		}
 	}
 
 	// Cleanup
 	function handleClickOutside(event) {
-		if (showColorPicker && colorPickerElement && !colorPickerElement.contains(event.target) &&
-		    !event.target.closest('.color-picker-btn') && !event.target.closest('.color-picker-container')) {
+		// Non chiudere il color picker se si clicca all'interno del bubble menu
+		if (showColorPicker && colorPickerElement && 
+		    !colorPickerElement.contains(event.target) &&
+		    !event.target.closest('.color-picker-btn') && 
+		    !event.target.closest('.color-picker-container') &&
+		    !bubbleMenuElement?.contains(event.target)) {
 			showColorPicker = false;
+		}
+		
+		// Close headings dropdown if clicking outside
+		if (showHeadingsDropdown && headingsDropdownElement && 
+		    !headingsDropdownElement.contains(event.target) &&
+		    !event.target.closest('.headings-dropdown-btn')) {
+			showHeadingsDropdown = false;
+		}
+		
+		// Close alignment dropdown if clicking outside
+		if (showAlignmentDropdown && alignmentDropdownElement && 
+		    !alignmentDropdownElement.contains(event.target) &&
+		    !event.target.closest('.alignment-dropdown-btn')) {
+			showAlignmentDropdown = false;
+		}
+		
+		// Close insert dropdown if clicking outside
+		if (showInsertDropdown && insertDropdownElement && 
+		    !insertDropdownElement.contains(event.target) &&
+		    !event.target.closest('.insert-dropdown-btn')) {
+			showInsertDropdown = false;
+		}
+	}
+	
+	function toggleHeadingsDropdown() {
+		showHeadingsDropdown = !showHeadingsDropdown;
+		if (showHeadingsDropdown) {
+			showAlignmentDropdown = false;
+			showInsertDropdown = false;
+		}
+	}
+	
+	function toggleAlignmentDropdown() {
+		showAlignmentDropdown = !showAlignmentDropdown;
+		if (showAlignmentDropdown) {
+			showHeadingsDropdown = false;
+			showInsertDropdown = false;
+		}
+	}
+	
+	function toggleInsertDropdown() {
+		showInsertDropdown = !showInsertDropdown;
+		if (showInsertDropdown) {
+			showHeadingsDropdown = false;
+			showAlignmentDropdown = false;
+		}
+	}
+
+	function updateToolbarPosition() {
+		if (!toolbarContainer || showBubbleMenu) return;
+		
+		// Find the editor-content element (the actual content area)
+		let editorContent = document.querySelector('.editor-content');
+		
+		// If not found, try finding it in the container
+		if (!editorContent) {
+			const container = toolbarContainer.closest('.text-editor-container') ||
+			                 toolbarContainer.closest('.editor-section') ||
+			                 toolbarContainer.closest('.editor-container');
+			if (container) {
+				editorContent = container.querySelector('.editor-content');
+			}
+		}
+		
+		// If still not found, search globally
+		if (!editorContent) {
+			const allEditorContents = document.querySelectorAll('.editor-content');
+			for (const content of allEditorContents) {
+				const rect = content.getBoundingClientRect();
+				if (rect.width > 0 && rect.height > 0) {
+					editorContent = content;
+					break;
+				}
+			}
+		}
+		
+		if (editorContent) {
+			const contentRect = editorContent.getBoundingClientRect();
+			const viewportWidth = window.innerWidth;
+			
+			// Calculate the center of editor-content in viewport coordinates
+			const contentCenterX = contentRect.left + (contentRect.width / 2);
+			
+			// Position toolbar so its center aligns with editor-content center
+			// Using fixed positioning, calculate right position from viewport right edge
+			const rightPx = viewportWidth - contentCenterX;
+			toolbarRight = `${rightPx}px`;
+		} else {
+			// Fallback: center in viewport
+			toolbarRight = '50%';
+		}
+	}
+
+	// Update toolbar position when layout changes
+	function handleLayoutChange() {
+		if (!showBubbleMenu && toolbarContainer) {
+			requestAnimationFrame(() => {
+				updateToolbarPosition();
+			});
 		}
 	}
 
 	onMount(() => {
 		document.addEventListener('click', handleClickOutside);
+		
+		if (!showBubbleMenu) {
+			// Initialize toolbar position after DOM is ready
+			setTimeout(() => {
+				if (toolbarContainer) {
+					updateToolbarPosition();
+				}
+				
+				// Listen to window resize
+				window.addEventListener('resize', handleLayoutChange);
+				
+				// Use a simple interval to check for layout changes (when whiteboard opens/closes)
+				// This is simpler and more reliable than MutationObserver
+				const layoutCheckInterval = setInterval(() => {
+					handleLayoutChange();
+				}, 100);
+				
+				// Store interval for cleanup
+				window._textEditorLayoutInterval = layoutCheckInterval;
+			}, 100);
+		}
 	});
 
 	onDestroy(() => {
@@ -372,6 +557,13 @@
 			editor.destroy();
 		}
 		document.removeEventListener('click', handleClickOutside);
+		window.removeEventListener('resize', handleLayoutChange);
+		
+		// Cleanup layout check interval
+		if (window._textEditorLayoutInterval) {
+			clearInterval(window._textEditorLayoutInterval);
+			window._textEditorLayoutInterval = null;
+		}
 	});
 </script>
 
@@ -460,18 +652,19 @@
 
 				<!-- Colors -->
 				<div class="color-picker-container">
-					<button class="toolbar-btn color-picker-btn" on:click={toggleColorPicker} title="Text Color">
+					<button class="toolbar-btn color-picker-btn" on:click={toggleColorPicker} on:mousedown|stopPropagation title="Text Color">
 						<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
 					</button>
 
 					{#if showColorPicker}
-						<div class="color-picker-dropdown" bind:this={colorPickerElement}>
+						<div class="color-picker-dropdown" bind:this={colorPickerElement} on:mousedown|stopPropagation>
 							<div class="color-palette">
 								{#each colorPalette as color}
 									<button
 										class="color-option"
 										style="background-color: {color}"
-										on:click={() => applyColor(color)}
+										on:click={(e) => applyColor(color, e)}
+										on:mousedown|stopPropagation
 										title={color}
 									></button>
 								{/each}
@@ -483,8 +676,171 @@
 									class="custom-color-input"
 									title="Custom color"
 								/>
-								<button class="color-reset-btn" on:click={resetColor} title="Reset color">×</button>
-								<button class="toolbar-btn" on:click={applyCustomColor} title="Apply custom color">
+								<button class="color-reset-btn" on:click={resetColor} on:mousedown|stopPropagation title="Reset color">×</button>
+								<button class="toolbar-btn" on:click={applyCustomColor} on:mousedown|stopPropagation title="Apply custom color">
+									<Icon name="check" size={14} />
+								</button>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Fixed Bottom Toolbar (when bubble menu is disabled) -->
+	{#if !showBubbleMenu}
+		<div 
+			class="text-editor-toolbar-container"
+			bind:this={toolbarContainer} 
+			style="right: {toolbarRight || '50%'};"
+		>
+			<div class="text-editor-toolbar-content">
+				<!-- Text formatting -->
+				<button class="toolbar-btn" on:click={toggleBold} title="Bold">
+					<Icon name="bold" size={16} />
+				</button>
+				<button class="toolbar-btn" on:click={toggleItalic} title="Italic">
+					<Icon name="italic" size={16} />
+				</button>
+				<button class="toolbar-btn" on:click={toggleStrike} title="Strikethrough">
+					<Icon name="strikethrough" size={16} />
+				</button>
+				<button class="toolbar-btn" on:click={toggleCode} title="Code">
+					<Icon name="code" size={16} />
+				</button>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Headings dropdown -->
+				<div class="dropdown-container">
+					<button class="toolbar-btn headings-dropdown-btn" on:click={toggleHeadingsDropdown} on:mousedown|stopPropagation title="Headings">
+						<span>H</span>
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 4px;">
+							<polyline points="6 9 12 15 18 9"></polyline>
+						</svg>
+					</button>
+					{#if showHeadingsDropdown}
+						<div class="toolbar-dropdown toolbar-dropdown-bottom" bind:this={headingsDropdownElement} on:mousedown|stopPropagation>
+							<button class="dropdown-item" on:click={() => { setHeading(1); showHeadingsDropdown = false; }} title="Heading 1">
+								<span>H1</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { setHeading(2); showHeadingsDropdown = false; }} title="Heading 2">
+								<span>H2</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { setHeading(3); showHeadingsDropdown = false; }} title="Heading 3">
+								<span>H3</span>
+							</button>
+						</div>
+					{/if}
+				</div>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Insert elements dropdown -->
+				<div class="dropdown-container">
+					<button class="toolbar-btn insert-dropdown-btn" on:click={toggleInsertDropdown} on:mousedown|stopPropagation title="Insert Elements">
+						<Icon name="plus" size={16} />
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 4px;">
+							<polyline points="6 9 12 15 18 9"></polyline>
+						</svg>
+					</button>
+					{#if showInsertDropdown}
+						<div class="toolbar-dropdown toolbar-dropdown-bottom" bind:this={insertDropdownElement} on:mousedown|stopPropagation>
+							<button class="dropdown-item" on:click={() => { setLink(); showInsertDropdown = false; }} title="Insert Link">
+								<Icon name="link" size={16} />
+								<span>Link</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { addImage(); showInsertDropdown = false; }} title="Insert Image">
+								<Icon name="image" size={16} />
+								<span>Image</span>
+							</button>
+							<div class="dropdown-separator"></div>
+							<button class="dropdown-item" on:click={() => { toggleBulletList(); showInsertDropdown = false; }} title="Bullet List">
+								<Icon name="list" size={16} />
+								<span>Bullet List</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { toggleOrderedList(); showInsertDropdown = false; }} title="Numbered List">
+								<Icon name="list-ordered" size={16} />
+								<span>Numbered List</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { toggleBlockquote(); showInsertDropdown = false; }} title="Quote">
+								<Icon name="quote" size={16} />
+								<span>Quote</span>
+							</button>
+							<div class="dropdown-separator"></div>
+							<button class="dropdown-item" on:click={() => { addTable(); showInsertDropdown = false; }} title="Insert Table">
+								<Icon name="table" size={16} />
+								<span>Table</span>
+							</button>
+							{#if isInTableState}
+								<button class="dropdown-item" on:click={() => { deleteTable(); showInsertDropdown = false; }} title="Delete Table">
+									<Icon name="trash" size={16} />
+									<span>Delete Table</span>
+								</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Text alignment dropdown -->
+				<div class="dropdown-container">
+					<button class="toolbar-btn alignment-dropdown-btn" on:click={toggleAlignmentDropdown} on:mousedown|stopPropagation title="Text Alignment">
+						<Icon name="align-left" size={16} />
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left: 4px;">
+							<polyline points="6 9 12 15 18 9"></polyline>
+						</svg>
+					</button>
+					{#if showAlignmentDropdown}
+						<div class="toolbar-dropdown toolbar-dropdown-bottom" bind:this={alignmentDropdownElement} on:mousedown|stopPropagation>
+							<button class="dropdown-item" on:click={() => { setTextAlign('left'); showAlignmentDropdown = false; }} title="Align Left">
+								<Icon name="align-left" size={16} />
+								<span>Align Left</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { setTextAlign('center'); showAlignmentDropdown = false; }} title="Align Center">
+								<Icon name="align-center" size={16} />
+								<span>Align Center</span>
+							</button>
+							<button class="dropdown-item" on:click={() => { setTextAlign('right'); showAlignmentDropdown = false; }} title="Align Right">
+								<Icon name="align-right" size={16} />
+								<span>Align Right</span>
+							</button>
+						</div>
+					{/if}
+				</div>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Colors -->
+				<div class="color-picker-container">
+					<button class="toolbar-btn color-picker-btn" on:click={toggleColorPicker} on:mousedown|stopPropagation title="Text Color">
+						<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
+					</button>
+
+					{#if showColorPicker}
+						<div class="color-picker-dropdown color-picker-dropdown-bottom" bind:this={colorPickerElement} on:mousedown|stopPropagation>
+							<div class="color-palette">
+								{#each colorPalette as color}
+									<button
+										class="color-option"
+										style="background-color: {color}"
+										on:click={(e) => applyColor(color, e)}
+										on:mousedown|stopPropagation
+										title={color}
+									></button>
+								{/each}
+							</div>
+							<div class="color-controls">
+								<input
+									type="color"
+									bind:value={customColor}
+									class="custom-color-input"
+									title="Custom color"
+								/>
+								<button class="color-reset-btn" on:click={resetColor} on:mousedown|stopPropagation title="Reset color">×</button>
+								<button class="toolbar-btn" on:click={applyCustomColor} on:mousedown|stopPropagation title="Apply custom color">
 									<Icon name="check" size={14} />
 								</button>
 							</div>
@@ -519,6 +875,8 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		position: relative;
+		overflow: visible;
 	}
 
 	.toolbar-btn {
@@ -586,7 +944,13 @@
 		box-shadow: var(--shadow-lg);
 		padding: 0.75rem;
 		min-width: 200px;
-		z-index: 1000;
+		z-index: 200;
+	}
+
+	.color-picker-dropdown-bottom {
+		top: auto;
+		bottom: calc(100% + 0.5rem);
+		z-index: 200;
 	}
 
 	.color-palette {
@@ -659,13 +1023,44 @@
 		flex: 1;
 		font-size: 16px;
 		line-height: 1.6;
-		padding-bottom: 4rem;
+		padding-bottom: 5rem;
 		position: relative;
+	}
+
+	/* Fixed Bottom Toolbar - Always uses fixed positioning, moves horizontally only */
+	.text-editor-toolbar-container {
+		position: fixed;
+		/* Compensate for whiteboard section padding/margin - whiteboard toolbar uses absolute positioning 
+		   relative to whiteboard-layout (100vh), so we need to account for any container spacing */
+		bottom: 1.5rem;
+		z-index: 100;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+		padding: 0.5rem; /* Same padding as whiteboard toolbar for consistent height */
+		pointer-events: auto;
+		opacity: 1;
+		transform: translateX(50%);
+		/* Smooth horizontal transition when whiteboard opens/closes - ONLY horizontal movement */
+		transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		box-sizing: border-box; /* Ensure border is included in height calculation */
+		height: calc(32px + 1rem + 2px); /* Button height (32px) + padding top/bottom (0.5rem * 2 = 1rem) + border top/bottom (1px * 2 = 2px) */
+	}
+
+	.text-editor-toolbar-content {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 0.5rem; /* Same gap as whiteboard toolbar for consistent height */
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		height: 32px; /* Exact height to match whiteboard toolbar buttons */
 	}
 
 	.bubble-menu {
 		position: absolute;
-		z-index: 1000;
+		z-index: 150;
 		background: var(--bg-secondary);
 		border: 1px solid var(--border-color);
 		border-radius: var(--radius);
@@ -852,5 +1247,63 @@
 	:global(.ProseMirror .column-resize-handle:hover),
 	:global(.ProseMirror .column-resize-handle.active) {
 		opacity: 1;
+	}
+
+	/* Dropdown styles */
+	.dropdown-container {
+		position: relative;
+		display: inline-block;
+	}
+
+	.toolbar-dropdown {
+		position: absolute;
+		bottom: calc(100% + 0.5rem);
+		left: 0;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+		padding: 0.25rem;
+		min-width: 150px;
+		z-index: 200;
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+
+	.toolbar-dropdown-bottom {
+		top: auto;
+		bottom: calc(100% + 0.5rem);
+	}
+
+	.dropdown-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: transparent;
+		border: none;
+		border-radius: var(--radius-sm);
+		color: var(--text-primary);
+		cursor: pointer;
+		font-size: 0.875rem;
+		transition: var(--transition);
+		width: 100%;
+		text-align: left;
+	}
+
+	.dropdown-item:hover {
+		background: var(--bg-tertiary);
+		color: var(--text-primary);
+	}
+
+	.dropdown-item span {
+		flex: 1;
+	}
+
+	.dropdown-separator {
+		height: 1px;
+		background: var(--border-color);
+		margin: 0.25rem 0;
 	}
 </style>

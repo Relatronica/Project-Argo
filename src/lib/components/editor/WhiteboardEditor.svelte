@@ -37,10 +37,7 @@
 	let paths = [];
 	let autoSaveTimer = null;
 
-	// Bubble menu state
-	let showBubbleMenu = false;
-	let bubbleMenuPosition = { top: 0, left: 0 };
-	let bubbleMenuElement;
+	// Table state
 	let isInTableState = false;
 
 	// Color picker state
@@ -135,7 +132,6 @@
 		} else {
 			linkUrl = textEditor?.getAttributes('link')?.href || '';
 			showLinkModal = true;
-			showBubbleMenu = false; // Chiudi il bubble menu quando apri il modale
 		}
 	}
 
@@ -156,7 +152,6 @@
 		imageUrl = '';
 		imageFile = null;
 		showImageModal = true;
-		showBubbleMenu = false; // Chiudi il bubble menu quando apri il modale
 	}
 
 	async function handleImageConfirm(event) {
@@ -210,13 +205,32 @@
 	function setColor(color) { textEditor?.chain().focus().setColor(color).run(); }
 	function toggleColorPicker() {
 		showColorPicker = !showColorPicker;
-		if (showColorPicker) {
-			showBubbleMenu = false; // Chiudi il bubble menu quando apri il color picker
-		}
 	}
-	function applyColor(color) { setColor(color); customColor = color; showColorPicker = false; }
-	function applyCustomColor() { setColor(customColor); }
-	function resetColor() { textEditor?.chain().focus().unsetColor().run(); showColorPicker = false; }
+	function applyColor(color, event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		setColor(color);
+		customColor = color;
+		showColorPicker = false;
+	}
+	function applyCustomColor(event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		setColor(customColor);
+		showColorPicker = false;
+	}
+	function resetColor(event) {
+		if (event) {
+			event.stopPropagation();
+			event.preventDefault();
+		}
+		textEditor?.chain().focus().unsetColor().run();
+		showColorPicker = false;
+	}
 
 	function getCurrentColor() {
 		if (!textEditor) return null;
@@ -230,62 +244,6 @@
 		return textEditor?.isActive(type, options) || false;
 	}
 
-	// Bubble menu - same implementation as working TextEditor
-	function updateBubbleMenu() {
-		console.log('[WhiteboardEditor] updateBubbleMenu called');
-
-		if (!textEditor || !textEditorElement) {
-			console.log('[WhiteboardEditor] updateBubbleMenu: editor or element not ready');
-			showBubbleMenu = false;
-			return;
-		}
-
-		const { state } = textEditor;
-		const { selection } = state;
-		const { from, to } = selection;
-
-		console.log('[WhiteboardEditor] updateBubbleMenu: selection', { from, to, empty: selection.empty });
-
-		if (from !== to && !selection.empty) {
-			console.log('[WhiteboardEditor] updateBubbleMenu: showing bubble menu');
-			try {
-				const { view } = textEditor;
-				const start = view.coordsAtPos(from);
-				const end = view.coordsAtPos(to);
-
-				const rect = textEditorElement.getBoundingClientRect();
-				const middleX = (start.left + end.left) / 2;
-
-				const spacing = 8;
-				let menuHeight = bubbleMenuElement?.offsetHeight || 50;
-				let menuWidth = bubbleMenuElement?.offsetWidth || 400;
-
-				let left = middleX - rect.left;
-				let top = start.top - rect.top - menuHeight - spacing;
-
-				const halfMenuWidth = menuWidth / 2;
-				const padding = 10;
-				const minLeft = halfMenuWidth + padding;
-				const maxLeft = rect.width - halfMenuWidth - padding;
-
-				left = Math.max(minLeft, Math.min(maxLeft, left));
-
-				if (top < padding) {
-					top = start.top - rect.top + 24 + spacing;
-				}
-
-				bubbleMenuPosition = { top, left };
-				showBubbleMenu = true;
-				console.log('[WhiteboardEditor] updateBubbleMenu: bubble menu positioned at', { top, left });
-			} catch (error) {
-				console.error('[WhiteboardEditor] updateBubbleMenu: error positioning bubble menu', error);
-				showBubbleMenu = false;
-			}
-		} else {
-			console.log('[WhiteboardEditor] updateBubbleMenu: hiding bubble menu');
-			showBubbleMenu = false;
-		}
-	}
 
 	// Check table state - same implementation as working TextEditor
 	function checkTableState() {
@@ -367,7 +325,6 @@
 				if (selectionCount % 5 === 0) console.log('[WhiteboardEditor] onSelectionUpdate triggered (sample)');
 
 				checkTableState();
-				updateBubbleMenu();
 				onSelectionUpdate?.();
 			},
 			editorProps: {
@@ -378,7 +335,6 @@
 		});
 
 		checkTableState();
-		updateBubbleMenu();
 		console.log('[WhiteboardEditor] initTextEditor: editor initialized successfully');
 		onReady?.();
 		// Provide reference to parent for data access during mode switches
@@ -477,10 +433,32 @@
 		whiteboardComponent.setLineWidth(whiteboardLineWidth);
 	}
 
+	// Update editor theme when it changes
+	$: if (textEditor && textEditor.view && textEditorElement) {
+		// Get the ProseMirror editor DOM element
+		const editorDOM = textEditor.view.dom;
+		if (editorDOM) {
+			// Remove old theme classes
+			editorDOM.classList.remove('dark', 'light');
+			// Add new theme class
+			editorDOM.classList.add($isDarkTheme ? 'dark' : 'light');
+			
+			// Also update any nested .editor-content elements as fallback
+			const editorContent = textEditorElement.querySelector('.editor-content');
+			if (editorContent && editorContent !== editorDOM) {
+				editorContent.classList.remove('dark', 'light');
+				editorContent.classList.add($isDarkTheme ? 'dark' : 'light');
+			}
+		}
+	}
+
 	// Cleanup
 	function handleClickOutside(event) {
-		if (showColorPicker && colorPickerElement && !colorPickerElement.contains(event.target) &&
-		    !event.target.closest('.color-picker-btn') && !event.target.closest('.color-picker-container')) {
+		// Chiudi il color picker se si clicca fuori
+		if (showColorPicker && colorPickerElement && 
+		    !colorPickerElement.contains(event.target) &&
+		    !event.target.closest('.color-picker-btn') && 
+		    !event.target.closest('.color-picker-container')) {
 			showColorPicker = false;
 		}
 	}
@@ -506,122 +484,117 @@
 		<div class="editor-section">
 			<div class="editor-wrapper">
 				<div bind:this={textEditorElement} class="editor whiteboard-text-area"></div>
+			</div>
 
-				<!-- Bubble Menu -->
-				{#if showBubbleMenu}
-					<div
-						class="bubble-menu"
-						bind:this={bubbleMenuElement}
-						style="top: {bubbleMenuPosition.top}px; left: {bubbleMenuPosition.left}px; transform: translateX(-50%);"
-					>
-						<div class="toolbar-content">
-							<!-- Text formatting -->
-							<button class="toolbar-btn" class:active={isActive('bold')} on:click={toggleBold} title="Bold">
-								<Icon name="bold" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive('italic')} on:click={toggleItalic} title="Italic">
-								<Icon name="italic" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive('strike')} on:click={toggleStrike} title="Strikethrough">
-								<Icon name="strikethrough" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive('code')} on:click={toggleCode} title="Code">
-								<Icon name="code" size={16} />
-							</button>
+			<!-- Fixed Bottom Toolbar -->
+			<div class="text-editor-toolbar-container">
+				<div class="text-editor-toolbar-content">
+					<!-- Text formatting -->
+					<button class="toolbar-btn" class:active={isActive('bold')} on:click={toggleBold} title="Bold">
+						<Icon name="bold" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive('italic')} on:click={toggleItalic} title="Italic">
+						<Icon name="italic" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive('strike')} on:click={toggleStrike} title="Strikethrough">
+						<Icon name="strikethrough" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive('code')} on:click={toggleCode} title="Code">
+						<Icon name="code" size={16} />
+					</button>
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Headings -->
-							<button class="toolbar-btn" class:active={isActive('heading', { level: 1 })} on:click={() => setHeading(1)} title="Heading 1">H1</button>
-							<button class="toolbar-btn" class:active={isActive('heading', { level: 2 })} on:click={() => setHeading(2)} title="Heading 2">H2</button>
-							<button class="toolbar-btn" class:active={isActive('heading', { level: 3 })} on:click={() => setHeading(3)} title="Heading 3">H3</button>
+					<!-- Headings -->
+					<button class="toolbar-btn" class:active={isActive('heading', { level: 1 })} on:click={() => setHeading(1)} title="Heading 1">H1</button>
+					<button class="toolbar-btn" class:active={isActive('heading', { level: 2 })} on:click={() => setHeading(2)} title="Heading 2">H2</button>
+					<button class="toolbar-btn" class:active={isActive('heading', { level: 3 })} on:click={() => setHeading(3)} title="Heading 3">H3</button>
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Lists -->
-							<button class="toolbar-btn" class:active={isActive('bulletList')} on:click={toggleBulletList} title="Bullet List">
-								<Icon name="list" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive('orderedList')} on:click={toggleOrderedList} title="Numbered List">
-								<Icon name="list-ordered" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive('blockquote')} on:click={toggleBlockquote} title="Quote">
-								<Icon name="quote" size={16} />
-							</button>
+					<!-- Lists -->
+					<button class="toolbar-btn" class:active={isActive('bulletList')} on:click={toggleBulletList} title="Bullet List">
+						<Icon name="list" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive('orderedList')} on:click={toggleOrderedList} title="Numbered List">
+						<Icon name="list-ordered" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive('blockquote')} on:click={toggleBlockquote} title="Quote">
+						<Icon name="quote" size={16} />
+					</button>
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Links and Images -->
-							<button class="toolbar-btn" class:active={isActive('link')} on:click={setLink} title="Insert Link">
-								<Icon name="link" size={16} />
-							</button>
-							<button class="toolbar-btn" on:click={addImage} title="Insert Image">
-								<Icon name="image" size={16} />
-							</button>
+					<!-- Links and Images -->
+					<button class="toolbar-btn" class:active={isActive('link')} on:click={setLink} title="Insert Link">
+						<Icon name="link" size={16} />
+					</button>
+					<button class="toolbar-btn" on:click={addImage} title="Insert Image">
+						<Icon name="image" size={16} />
+					</button>
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Tables -->
-							<button class="toolbar-btn" on:click={addTable} title="Insert Table">
-								<Icon name="table" size={16} />
-							</button>
-							{#if isInTableState}
-								<button class="toolbar-btn" on:click={deleteTable} title="Delete Table">
-									<Icon name="trash" size={16} />
-								</button>
-							{/if}
+					<!-- Tables -->
+					<button class="toolbar-btn" on:click={addTable} title="Insert Table">
+						<Icon name="table" size={16} />
+					</button>
+					{#if isInTableState}
+						<button class="toolbar-btn" on:click={deleteTable} title="Delete Table">
+							<Icon name="trash" size={16} />
+						</button>
+					{/if}
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Text alignment -->
-							<button class="toolbar-btn" class:active={isActive({ textAlign: 'left' })} on:click={() => setTextAlign('left')} title="Align Left">
-								<Icon name="align-left" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive({ textAlign: 'center' })} on:click={() => setTextAlign('center')} title="Align Center">
-								<Icon name="align-center" size={16} />
-							</button>
-							<button class="toolbar-btn" class:active={isActive({ textAlign: 'right' })} on:click={() => setTextAlign('right')} title="Align Right">
-								<Icon name="align-right" size={16} />
-							</button>
+					<!-- Text alignment -->
+					<button class="toolbar-btn" class:active={isActive({ textAlign: 'left' })} on:click={() => setTextAlign('left')} title="Align Left">
+						<Icon name="align-left" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive({ textAlign: 'center' })} on:click={() => setTextAlign('center')} title="Align Center">
+						<Icon name="align-center" size={16} />
+					</button>
+					<button class="toolbar-btn" class:active={isActive({ textAlign: 'right' })} on:click={() => setTextAlign('right')} title="Align Right">
+						<Icon name="align-right" size={16} />
+					</button>
 
-							<div class="toolbar-separator"></div>
+					<div class="toolbar-separator"></div>
 
-							<!-- Colors -->
-							<div class="color-picker-container">
-								<button class="toolbar-btn color-picker-btn" on:click={toggleColorPicker} title="Text Color">
-									<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
-								</button>
+					<!-- Colors -->
+					<div class="color-picker-container">
+						<button class="toolbar-btn color-picker-btn" on:click={toggleColorPicker} on:mousedown|stopPropagation title="Text Color">
+							<div class="color-indicator" style="background-color: {getCurrentColor() || '#000000'}"></div>
+						</button>
 
-								{#if showColorPicker}
-									<div class="color-picker-dropdown" bind:this={colorPickerElement}>
-										<div class="color-palette">
-											{#each colorPalette as color}
-												<button
-													class="color-option"
-													style="background-color: {color}"
-													on:click={() => applyColor(color)}
-													title={color}
-												></button>
-											{/each}
-										</div>
-										<div class="color-controls">
-											<input
-												type="color"
-												bind:value={customColor}
-												class="custom-color-input"
-												title="Custom color"
-											/>
-											<button class="color-reset-btn" on:click={resetColor} title="Reset color">×</button>
-											<button class="toolbar-btn" on:click={applyCustomColor} title="Apply custom color">
-												<Icon name="check" size={14} />
-											</button>
-										</div>
-									</div>
-								{/if}
+						{#if showColorPicker}
+							<div class="color-picker-dropdown color-picker-dropdown-bottom" bind:this={colorPickerElement} on:mousedown|stopPropagation>
+								<div class="color-palette">
+									{#each colorPalette as color}
+										<button
+											class="color-option"
+											style="background-color: {color}"
+											on:click={(e) => applyColor(color, e)}
+											on:mousedown|stopPropagation
+											title={color}
+										></button>
+									{/each}
+								</div>
+								<div class="color-controls">
+									<input
+										type="color"
+										bind:value={customColor}
+										class="custom-color-input"
+										title="Custom color"
+									/>
+									<button class="color-reset-btn" on:click={resetColor} on:mousedown|stopPropagation title="Reset color">×</button>
+									<button class="toolbar-btn" on:click={applyCustomColor} on:mousedown|stopPropagation title="Apply custom color">
+										<Icon name="check" size={14} />
+									</button>
+								</div>
 							</div>
-						</div>
+						{/if}
 					</div>
-				{/if}
+				</div>
 			</div>
 		</div>
 
@@ -814,6 +787,7 @@
 		background: var(--bg-primary);
 		overflow: hidden;
 		min-height: 0;
+		position: relative;
 	}
 
 	.editor-wrapper {
@@ -821,8 +795,30 @@
 		display: flex;
 		flex-direction: column;
 		overflow: auto;
-		padding-bottom: 4rem;
+		padding-bottom: 5rem;
 		position: relative;
+	}
+
+	/* Fixed Bottom Toolbar */
+	.text-editor-toolbar-container {
+		position: absolute;
+		bottom: 1.5rem;
+		right: 1.5rem;
+		z-index: 100;
+		background: var(--bg-secondary);
+		border: 1px solid var(--border-color);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-lg);
+		padding: 0.5rem;
+	}
+
+	.text-editor-toolbar-content {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		gap: 0.25rem;
+		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 
 	.whiteboard-text-area {
@@ -971,25 +967,6 @@
 		background: #fff;
 	}
 
-	/* Bubble Menu Styles */
-	.bubble-menu {
-		position: absolute;
-		z-index: 1000;
-		background: var(--bg-secondary);
-		border: 1px solid var(--border-color);
-		border-radius: var(--radius);
-		box-shadow: var(--shadow-lg);
-		padding: 0.5rem;
-		pointer-events: all;
-	}
-
-	.toolbar-content {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		gap: 0.25rem;
-		flex-wrap: wrap;
-	}
 
 	.toolbar-btn {
 		background: var(--bg-secondary);
@@ -1052,7 +1029,7 @@
 		transition: var(--transition);
 	}
 
-	.color-picker-dropdown {
+	.	.color-picker-dropdown {
 		position: absolute;
 		top: calc(100% + 0.5rem);
 		left: 0;
@@ -1061,8 +1038,13 @@
 		border-radius: var(--radius);
 		padding: 0.75rem;
 		box-shadow: var(--shadow-lg);
-		z-index: 1001;
+		z-index: 200;
 		min-width: 200px;
+	}
+
+	.color-picker-dropdown-bottom {
+		top: auto;
+		bottom: calc(100% + 0.5rem);
 	}
 
 	.color-palette {

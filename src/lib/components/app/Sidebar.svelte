@@ -21,8 +21,8 @@
 		sidebarOpen = !sidebarOpen;
 	}
 
-	function handleCreateNote() {
-		createNewNote();
+	async function handleCreateNote() {
+		await createNewNote();
 		dispatch('noteCreated');
 	}
 </script>

@@ -17,49 +17,89 @@
 
 	// State for whiteboard paths
 	let whiteboardPaths = [];
+	
+	// Toolbar animation state
+	let toolbarVisible = false; // Start hidden, will animate in on first render
+	let isTransitioning = false; // Track if toolbar is transitioning
+	let isInitialized = false; // Track if toolbar has been initialized
 
 	// Function called when a new path is added
 	function handlePathAdd(newPath) {
-		console.log('[WhiteboardLayout] Adding new path');
-		whiteboardPaths = [...whiteboardPaths, newPath];
+		// Create a deep copy to avoid reference sharing
+		const newPathCopy = JSON.parse(JSON.stringify(newPath));
+		whiteboardPaths = [...whiteboardPaths, newPathCopy];
 		saveWhiteboardData();
 	}
 
 	// Function called when paths need to be changed (e.g., clear)
 	function handlePathsChange(newPaths) {
-		console.log('[WhiteboardLayout] Paths changed, new length:', newPaths.length);
-		whiteboardPaths = [...newPaths];
+		// Create a deep copy to avoid reference sharing
+		whiteboardPaths = JSON.parse(JSON.stringify(newPaths));
 		saveWhiteboardData();
 	}
 
-	// Save whiteboard data - aggiorna immediatamente e notifica il parent
-	// Il parent (EditorContainer) gestisce il debounce e il salvataggio
+	// Save whiteboard data - updates immediately and notifies parent
+	// Parent (EditorContainer) handles debounce and persistence
 	function saveWhiteboardData() {
 		if (!note) return;
 
-		// Always update note.whiteboardData immediately so it's available when note changes
 		const data = JSON.stringify({ paths: whiteboardPaths });
 		note.whiteboardData = data;
-		
-		// Notify parent immediately - EditorContainer gestirà il debounce e il salvataggio
 		onContentChange?.(note.whiteboardData);
 	}
 
 
 	// Load whiteboard data from note
 	function loadWhiteboardData() {
+		console.log('[WhiteboardLayout] loadWhiteboardData called', {
+			noteId: note?.id,
+			hasWhiteboardData: !!note?.whiteboardData,
+			whiteboardDataType: typeof note?.whiteboardData,
+			whiteboardDataLength: typeof note?.whiteboardData === 'string' ? note.whiteboardData.length : 'N/A'
+		});
+		
+		// Always reset paths first to prevent showing data from previous note
+		whiteboardPaths = [];
+		
 		if (!note?.whiteboardData) {
-			console.log('[WhiteboardLayout] No whiteboard data, using empty paths');
-			whiteboardPaths = [];
+			console.log('[WhiteboardLayout] No whiteboardData, returning empty');
 			return;
+		}
+
+		// Check if whiteboardData is empty or whitespace
+		if (typeof note.whiteboardData === 'string' && note.whiteboardData.trim() === '') {
+			console.log('[WhiteboardLayout] whiteboardData is empty string, returning empty');
+			return;
+		}
+
+		// Check if whiteboardData is an empty object
+		if (typeof note.whiteboardData === 'string') {
+			const trimmed = note.whiteboardData.trim();
+			if (trimmed === '{}' || trimmed === '{"paths":[]}' || trimmed === '{"paths": []}') {
+				console.log('[WhiteboardLayout] whiteboardData is empty object, returning empty');
+				return;
+			}
 		}
 
 		try {
 			const data = typeof note.whiteboardData === 'string'
 				? JSON.parse(note.whiteboardData)
 				: note.whiteboardData;
-			whiteboardPaths = data.paths || [];
-			console.log('[WhiteboardLayout] Loaded whiteboard data, paths:', whiteboardPaths.length);
+			
+			// Validate data structure
+			if (!data || typeof data !== 'object' || !Array.isArray(data.paths) || data.paths.length === 0) {
+				console.log('[WhiteboardLayout] Invalid or empty paths array', {
+					hasData: !!data,
+					dataType: typeof data,
+					hasPaths: !!(data && Array.isArray(data.paths)),
+					pathsLength: data?.paths?.length || 0
+				});
+				return;
+			}
+			
+			// Create a deep copy of paths to avoid reference sharing
+			whiteboardPaths = JSON.parse(JSON.stringify(data.paths));
+			console.log('[WhiteboardLayout] Loaded', whiteboardPaths.length, 'paths');
 		} catch (error) {
 			console.error('[WhiteboardLayout] Error parsing whiteboard data:', error);
 			whiteboardPaths = [];
@@ -72,23 +112,17 @@
 	// Reactive statement: reload whiteboard data when note changes
 	let lastNoteId = note?.id || null;
 	
-	$: if (note && note.id && note.id !== lastNoteId) {
-		const previousNoteId = lastNoteId;
-		console.log('[WhiteboardLayout] Note changed from', previousNoteId, 'to', note.id);
-		
-		// Important: saveWhiteboardData() already updates note.whiteboardData immediately
-		// So even if the timer hasn't fired, the data is in the note object
-		// EditorContainer's savePendingChanges() will save the previous note with its whiteboardData
-		
-		// Update lastNoteId before loading to prevent loops
-		lastNoteId = note.id;
-		
-		// Load the new note's data
-		loadWhiteboardData();
-	} else if (note && lastNoteId === null) {
-		// First initialization
-		lastNoteId = note.id;
-		loadWhiteboardData();
+	$: if (note && note.id) {
+		if (note.id !== lastNoteId) {
+			// Reset paths immediately when note changes
+			whiteboardPaths = [];
+			lastNoteId = note.id;
+			loadWhiteboardData();
+		} else if (lastNoteId === null) {
+			// First initialization
+			lastNoteId = note.id;
+			loadWhiteboardData();
+		}
 	}
 
 	// Toolbar functions for whiteboard
@@ -112,6 +146,45 @@
 	$: if (whiteboardComponent && onReady) {
 		onReady();
 	}
+	
+	// Function to animate toolbar transition
+	function animateToolbarTransition(callback) {
+		if (isTransitioning) {
+			// If already transitioning, just execute callback without animation
+			if (callback) callback();
+			return;
+		}
+		
+		isTransitioning = true;
+		toolbarVisible = false;
+		
+		// Wait for hide animation to complete (300ms)
+		setTimeout(() => {
+			// Execute callback if provided
+			if (callback) {
+				callback();
+			}
+			
+			// Wait a bit for position to update, then show toolbar again
+			requestAnimationFrame(() => {
+				requestAnimationFrame(() => {
+					setTimeout(() => {
+						toolbarVisible = true;
+						isTransitioning = false;
+					}, 50);
+				});
+			});
+		}, 300); // Match animation duration
+	}
+	
+	// Animate toolbar in on first render
+	$: if (!isInitialized) {
+		isInitialized = true;
+		// Animate in from bottom after a short delay
+		setTimeout(() => {
+			toolbarVisible = true;
+		}, 100);
+	}
 
 	// Cleanup: save before destroying
 	onDestroy(() => {
@@ -134,6 +207,7 @@
 				{onContentChange}
 				{onSelectionUpdate}
 				{onReady}
+				showBubbleMenu={false}
 			/>
 		</div>
 
@@ -155,7 +229,7 @@
 		</div>
 
 		<!-- Whiteboard Toolbar (outside whiteboard-section to avoid overflow:hidden) -->
-		<div class="whiteboard-toolbar-container">
+		<div class="whiteboard-toolbar-container" class:hidden={!toolbarVisible}>
 			<div class="whiteboard-toolbar-content">
 				<!-- Whiteboard Tools -->
 				<button
@@ -325,16 +399,28 @@
 	}
 
 .whiteboard-toolbar-container {
-	position: absolute;
-	bottom: 1.5rem;
+	position: fixed; /* Changed from absolute to fixed to match text editor toolbar positioning */
+	bottom: 1.5rem; /* Same as text editor toolbar - aligned at same visual height */
 	left: 75%;
-	transform: translateX(-50%);
+	transform: translateX(-50%) translateY(0);
 	z-index: 1000;
 	background: var(--bg-secondary);
 	border: 1px solid var(--border-color);
 	border-radius: var(--radius);
 	box-shadow: var(--shadow-lg);
-	padding: 0.5rem;
+	padding: 0.5rem; /* Same padding as text editor toolbar for consistent height */
+	/* Smooth transition for visibility and position */
+	transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+	opacity: 1;
+	pointer-events: auto;
+	box-sizing: border-box; /* Ensure border is included in height calculation */
+	height: calc(32px + 1rem + 2px); /* Button height (32px) + padding top/bottom (0.5rem * 2 = 1rem) + border top/bottom (1px * 2 = 2px) */
+}
+
+.whiteboard-toolbar-container.hidden {
+	opacity: 0;
+	transform: translateX(-50%) translateY(100px);
+	pointer-events: none;
 }
 
 	.whiteboard-toolbar-content {
@@ -342,6 +428,7 @@
 		flex-direction: row;
 		align-items: center;
 		gap: 0.5rem;
+		height: 32px; /* Exact height to match text editor toolbar buttons */
 	}
 
 	.whiteboard-color-input {
