@@ -5,6 +5,7 @@
 	import { expandedFolders, toggleFolder, initializeFolders } from '../stores/folderExpansionStore.js';
 	import { organizeNotes, sortNotes } from '../utils/noteOrganization.js';
 	import { extractNoteTitle, groupNotesByFolder } from '../utils/noteHelpers.js';
+	import { isLoadingNote, setLoadingNote } from '../stores/loadingStore.js';
 	import { get } from 'svelte/store';
 	import NoteItem from './NoteItem.svelte';
 	import FolderGroup from './FolderGroup.svelte';
@@ -146,7 +147,7 @@
 	}
 
 	// Track loading state to prevent race conditions when switching notes rapidly
-	let isLoadingNote = false;
+	let isLoadingNoteLocal = false;
 	let pendingNoteId = null;
 
 	async function selectNote(note) {
@@ -156,19 +157,19 @@
 			return;
 		}
 
-		const noteIdToLoad = note.id;
-		
-		// If we're already loading a note, just update pendingNoteId
-		// The current load will check if the note changed and handle it
-		if (isLoadingNote) {
-			console.log('[NoteList] Note selection in progress, queuing:', noteIdToLoad);
-			pendingNoteId = noteIdToLoad;
+		// If we're already loading, prevent click (loading state will handle it)
+		const $isLoadingNote = get(isLoadingNote);
+		if ($isLoadingNote || isLoadingNoteLocal) {
+			console.log('[NoteList] Note selection in progress, ignoring click');
 			return;
 		}
 
-		// Start loading
-		isLoadingNote = true;
+		const noteIdToLoad = note.id;
+		
+		// Start loading - update both local and shared store
+		isLoadingNoteLocal = true;
 		pendingNoteId = noteIdToLoad;
+		setLoadingNote(true, '', 'loading');
 		
 		try {
 			const loadedNote = await loadNoteById(noteIdToLoad);
@@ -181,17 +182,20 @@
 				const pendingNote = $notesMetadata.find(n => n.id === pendingNoteId);
 				if (pendingNote) {
 					// Reset state and load the pending note
-					isLoadingNote = false;
+					isLoadingNoteLocal = false;
 					const pendingId = pendingNoteId;
 					pendingNoteId = null;
 					// Load the pending note
 					try {
+						setLoadingNote(true, '', 'loading');
 						const pendingLoadedNote = await loadNoteById(pendingId);
 						if (pendingLoadedNote) {
 							currentNote.set(pendingLoadedNote);
 						}
 					} catch (error) {
 						console.error('[NoteList] Error loading pending note:', error);
+					} finally {
+						setLoadingNote(false);
 					}
 				}
 				return;
@@ -200,14 +204,34 @@
 			// Load completed successfully, set the note
 			if (loadedNote) {
 				currentNote.set(loadedNote);
+				// Don't clear loading here - EditorContainer will clear it when editor is ready
+				// Add a safety timeout to clear loading if editor doesn't respond (5 seconds)
+				setTimeout(() => {
+					const $isLoading = get(isLoadingNote);
+					if ($isLoading) {
+						console.warn('[NoteList] Loading timeout - clearing loading state');
+						setLoadingNote(false);
+					}
+				}, 5000);
+			} else {
+				// No note loaded, clear loading immediately
+				isLoadingNoteLocal = false;
+				pendingNoteId = null;
+				setLoadingNote(false);
 			}
 		} catch (error) {
 			console.error('[NoteList] Error loading note:', error);
+			// Always clear loading on error
+			isLoadingNoteLocal = false;
+			pendingNoteId = null;
+			setLoadingNote(false);
 		} finally {
 			// Only clear loading state if this is still the current request
 			if (pendingNoteId === noteIdToLoad) {
-				isLoadingNote = false;
+				isLoadingNoteLocal = false;
 				pendingNoteId = null;
+				// Don't clear loading here - EditorContainer will clear it when editor is ready
+				// This ensures smooth transition from loading to editor ready
 			}
 		}
 	}
@@ -295,7 +319,7 @@
 		</div>
 	</div>
 
-	<div class="notes">
+	<div class="notes" class:loading={$isLoadingNote}>
 		{#if organizedNotes.type === 'none'}
 			{@const rootNotes = folderGroups[''] || []}
 			{@const nonRootFolders = sortedFolderEntries.filter(([path]) => path !== '')}
@@ -534,6 +558,25 @@
 		overflow-x: hidden;
 		padding: 0.5rem;
 		scroll-behavior: smooth;
+		transition: opacity 0.2s ease;
+	}
+
+	.notes.loading {
+		pointer-events: none;
+		opacity: 0.6;
+		position: relative;
+	}
+
+	.notes.loading::after {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		background: rgba(0, 0, 0, 0.02);
+		z-index: 1;
+		cursor: wait;
 	}
 
 	/* Custom scrollbar styling for better UX */

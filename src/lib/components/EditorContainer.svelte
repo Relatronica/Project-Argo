@@ -1,6 +1,7 @@
 <script>
 	import { onDestroy } from 'svelte';
 	import { hasUnsavedChanges, currentNote, masterKey, saveStatus } from '../stores/notesStore.js';
+	import { setLoadingNote } from '../stores/loadingStore.js';
 	import { get } from 'svelte/store';
 	import TextEditor from './editor/TextEditor.svelte';
 	import WhiteboardLayout from './editor/WhiteboardLayout.svelte';
@@ -97,6 +98,8 @@
 				content: note.content
 			};
 		}
+		// Clear loading state when editor is ready
+		setLoadingNote(false);
 	}
 
 	// Save pending changes before switching notes/modes
@@ -212,6 +215,9 @@
 					content: previousNoteData.content
 				};
 				
+				// Show loading state during save
+				setLoadingNote(true, '', 'saving');
+				
 				isSaving = true;
 				savePromise = (async () => {
 					try {
@@ -246,6 +252,9 @@
 				return;
 			}
 
+			// Show loading state while initializing new note
+			setLoadingNote(true, '', 'loading');
+
 			// Force re-initialization
 			editorReady = false;
 			
@@ -262,6 +271,9 @@
 			};
 
 			currentEditor = newMode;
+			
+			// Clear loading state after a brief delay to allow editor to initialize
+			// The loading will be cleared when editor is ready (handleEditorReady)
 		} finally {
 			isProcessingNoteChange = false;
 			

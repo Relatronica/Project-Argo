@@ -10,10 +10,84 @@
 	import { TextAlign } from '@tiptap/extension-text-align';
 	import { TextStyle } from '@tiptap/extension-text-style';
 	import { Color } from '@tiptap/extension-color';
+	import { Mark } from '@tiptap/core';
 	import { isDarkTheme } from '../../stores/themeStore.js';
+
+	// Comment extension for Tiptap
+	const Comment = Mark.create({
+		name: 'comment',
+		addOptions() {
+			return {
+				HTMLAttributes: {},
+			};
+		},
+		parseHTML() {
+			return [
+				{
+					tag: 'span[data-comment-id]',
+					getAttrs: (node) => {
+						if (typeof node === 'string') return false;
+						return {
+							commentId: node.getAttribute('data-comment-id'),
+						};
+					},
+					preserveWhitespace: 'full',
+				},
+			];
+		},
+		renderHTML({ HTMLAttributes, mark }) {
+			// Get commentId from mark attributes (this is the correct way in Tiptap)
+			const commentId = mark?.attrs?.commentId;
+			if (!commentId) {
+				// No commentId, return empty object (mark won't be rendered)
+				return {};
+			}
+			
+			return [
+				'span',
+				{
+					...this.options.HTMLAttributes,
+					...HTMLAttributes,
+					'data-comment-id': commentId,
+					class: `comment-mark ${HTMLAttributes?.class || ''}`.trim(),
+				},
+				0,
+			];
+		},
+		addAttributes() {
+			return {
+				commentId: {
+					default: null,
+					parseHTML: (element) => element.getAttribute('data-comment-id'),
+					renderHTML: (attributes) => {
+						if (!attributes.commentId) {
+							return {};
+						}
+						return {
+							'data-comment-id': attributes.commentId,
+						};
+					},
+				},
+			};
+		},
+		addCommands() {
+			return {
+				setComment: (attributes) => ({ commands }) => {
+					return commands.setMark(this.name, attributes);
+				},
+				unsetComment: () => ({ commands }) => {
+					return commands.unsetMark(this.name);
+				},
+				toggleComment: (attributes) => ({ commands }) => {
+					return commands.toggleMark(this.name, attributes);
+				},
+			};
+		},
+	});
 	import Icon from '../Icon.svelte';
 	import LinkModal from './LinkModal.svelte';
 	import ImageModal from './ImageModal.svelte';
+	import CommentPanel from './CommentPanel.svelte';
 
 	// Props
 	export let note;
@@ -53,6 +127,10 @@
 	let linkUrl = '';
 	let imageUrl = '';
 	let imageFile = null;
+
+	// Comment state
+	let showCommentPanel = false;
+	let selectedCommentId = null;
 
 	// Color palette
 	const colorPalette = [
@@ -241,6 +319,263 @@
 		return editor?.isActive(type, options) || false;
 	}
 
+	// Comment functions
+	function toggleCommentPanel() {
+		showCommentPanel = !showCommentPanel;
+	}
+
+	function addComment() {
+		if (!editor || !note) return;
+		
+		// Toggle comment panel
+		if (showCommentPanel) {
+			showCommentPanel = false;
+			return;
+		}
+		
+		// Open panel
+		showCommentPanel = true;
+		
+		const { from, to } = editor.state.selection;
+		
+		// If there's a selection with a comment, select it
+		if (from !== to) {
+			const attrs = editor.getAttributes('comment');
+			if (attrs.commentId) {
+				selectedCommentId = attrs.commentId;
+			}
+		}
+	}
+
+	async function handleCommentAdd(comment) {
+		if (!editor || !note) return;
+
+		const { from, to } = editor.state.selection;
+		if (from === to) {
+			// No selection, can't add comment to text
+			// But we can still add the comment to the list (orphaned comment)
+			if (!note.comments) {
+				note.comments = [];
+			}
+			note.comments.push(comment);
+			
+			// Trigger content change to save
+			if (editor) {
+				const html = editor.getHTML();
+				note.content = html;
+				onContentChange?.(html);
+			}
+			
+			// Save immediately to ensure comments are persisted
+			try {
+				const { saveCurrentNote } = await import('../../stores/notesStore.js');
+				await saveCurrentNote();
+			} catch (error) {
+				console.error('Error saving comment:', error);
+			}
+			return;
+		}
+
+		// Check if selection already has a comment
+		const attrs = editor.getAttributes('comment');
+		if (attrs.commentId) {
+			// Selection already has a comment, just add the new comment to list
+			// (This shouldn't happen, but handle it gracefully)
+			if (!note.comments) {
+				note.comments = [];
+			}
+			note.comments.push(comment);
+			
+			// Save immediately
+			try {
+				const { saveCurrentNote } = await import('../../stores/notesStore.js');
+				await saveCurrentNote();
+			} catch (error) {
+				console.error('Error saving comment:', error);
+			}
+			return;
+		}
+
+		// Add comment mark to selected text
+		editor.chain()
+			.focus()
+			.setComment({ commentId: comment.id })
+			.run();
+
+		// Add comment to note
+		if (!note.comments) {
+			note.comments = [];
+		}
+		note.comments.push(comment);
+
+		// Wait a bit to ensure the mark is applied before getting HTML
+		setTimeout(() => {
+			// Trigger content change to save
+			const html = editor.getHTML();
+			note.content = html;
+			onContentChange?.(html);
+		}, 10);
+		
+		// Save immediately to ensure comments are persisted
+		try {
+			const { saveCurrentNote } = await import('../../stores/notesStore.js');
+			await saveCurrentNote();
+		} catch (error) {
+			console.error('Error saving comment:', error);
+		}
+	}
+
+	async function handleCommentUpdate(commentId, updatedComment) {
+		if (!note || !note.comments) return;
+
+		const index = note.comments.findIndex(c => c.id === commentId);
+		if (index !== -1) {
+			note.comments[index] = updatedComment;
+			
+			// Trigger content change to save
+			if (editor) {
+				const html = editor.getHTML();
+				note.content = html;
+				onContentChange?.(html);
+			}
+			
+			// Save immediately to ensure comments are persisted
+			try {
+				const { saveCurrentNote } = await import('../../stores/notesStore.js');
+				await saveCurrentNote();
+			} catch (error) {
+				console.error('Error saving comment update:', error);
+			}
+		}
+	}
+
+	async function handleCommentDelete(commentId) {
+		if (!note || !note.comments) return;
+
+		// Remove comment from array
+		note.comments = note.comments.filter(c => c.id !== commentId);
+
+		// Remove comment marks from editor
+		if (editor) {
+			// Find all marks with this commentId and remove them
+			const { tr } = editor.state;
+			let modified = false;
+
+			tr.doc.descendants((node, pos) => {
+				if (node.marks) {
+					node.marks.forEach(mark => {
+						if (mark.type.name === 'comment' && mark.attrs.commentId === commentId) {
+							tr.removeMark(pos, pos + node.nodeSize, mark.type);
+							modified = true;
+						}
+					});
+				}
+			});
+
+			if (modified) {
+				editor.view.dispatch(tr);
+				const html = editor.getHTML();
+				note.content = html;
+				onContentChange?.(html);
+			}
+		}
+
+		if (selectedCommentId === commentId) {
+			selectedCommentId = null;
+		}
+		
+		// Save immediately to ensure comments are persisted
+		try {
+			const { saveCurrentNote } = await import('../../stores/notesStore.js');
+			await saveCurrentNote();
+		} catch (error) {
+			console.error('Error saving comment deletion:', error);
+		}
+	}
+
+	function handleCommentClick(commentId) {
+		selectedCommentId = commentId;
+		
+		// Scroll to comment in editor
+		if (!editor) return;
+		
+		// First, try to find in DOM directly (more reliable after note changes)
+		const editorDOM = editor.view.dom;
+		const commentSpan = editorDOM.querySelector(`span[data-comment-id="${commentId}"]`);
+		
+		if (commentSpan) {
+			// Scroll to the element first
+			commentSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
+			
+			// Also try to select it in the editor using document state
+			const { doc } = editor.state;
+			let targetPos = null;
+			let targetEndPos = null;
+
+			// Find the position in document state
+			doc.descendants((node, pos) => {
+				if (targetPos !== null) return false;
+				if (node.marks) {
+					node.marks.forEach(mark => {
+						if (mark.type.name === 'comment' && mark.attrs.commentId === commentId) {
+							targetPos = pos;
+							targetEndPos = pos + node.nodeSize;
+						}
+					});
+				}
+			});
+
+			// If found in document state, select it
+			if (targetPos !== null) {
+				setTimeout(() => {
+					editor.commands.setTextSelection({ from: targetPos, to: targetEndPos || targetPos });
+					editor.commands.scrollIntoView();
+				}, 100);
+			}
+			
+			// Highlight the comment mark briefly
+			setTimeout(() => {
+				commentSpan.style.transition = 'background-color 0.3s ease';
+				commentSpan.style.backgroundColor = 'var(--accent-light, rgba(59, 130, 246, 0.4))';
+				setTimeout(() => {
+					commentSpan.style.backgroundColor = '';
+				}, 1000);
+			}, 200);
+		} else {
+			// Fallback: try to find in document state only
+			const { doc } = editor.state;
+			let found = false;
+			let targetPos = null;
+			let targetEndPos = null;
+
+			doc.descendants((node, pos) => {
+				if (found) return false;
+				if (node.marks) {
+					node.marks.forEach(mark => {
+						if (mark.type.name === 'comment' && mark.attrs.commentId === commentId) {
+							targetPos = pos;
+							targetEndPos = pos + node.nodeSize;
+							found = true;
+						}
+					});
+				}
+			});
+
+			if (found && targetPos !== null) {
+				editor.commands.setTextSelection({ from: targetPos, to: targetEndPos || targetPos });
+				editor.commands.scrollIntoView();
+			}
+		}
+	}
+
+	// Load comments from note when note changes
+	$: if (note && editor) {
+		// Ensure comments array exists
+		if (!note.comments) {
+			note.comments = [];
+		}
+	}
+
 	// Bubble menu
 	function updateBubbleMenu() {
 		if (!showBubbleMenu || !editor || !editorElement) {
@@ -329,6 +664,7 @@
 				}),
 				TextAlign.configure({ types: ['heading', 'paragraph'] }),
 				TextStyle, Color,
+				Comment,
 			],
 			content: note?.content || '',
 			onUpdate: ({ editor }) => {
@@ -354,6 +690,18 @@
 		onReady?.();
 		onEditorRef?.(editor);
 		
+		// Ensure comment marks are properly rendered after editor initialization
+		if (note && note.comments && note.comments.length > 0) {
+			setTimeout(() => {
+				if (editor) {
+					// Force a view update to ensure comment marks are rendered
+					const { tr } = editor.state;
+					tr.setMeta('addToHistory', false);
+					editor.view.dispatch(tr);
+				}
+			}, 100);
+		}
+		
 		// Update toolbar position after editor is initialized
 		if (!showBubbleMenu) {
 			setTimeout(() => updateToolbarPosition(), 200);
@@ -368,8 +716,76 @@
 	// Update editor content when note changes externally
 	let lastNoteId = note?.id;
 	$: if (editor && note && lastNoteId !== note.id) {
-		editor.commands.setContent(note.content || '');
+		// Use setContent to load content - comment marks should be preserved via parseHTML
+		editor.commands.setContent(note.content || '', false);
 		lastNoteId = note.id;
+		
+		// Ensure comments array exists when note changes
+		if (!note.comments) {
+			note.comments = [];
+		}
+		
+		// After content is loaded, ensure comment marks are properly rendered
+		setTimeout(() => {
+			if (editor && note) {
+				// Force view update to ensure marks are rendered with correct styles
+				requestAnimationFrame(() => {
+					if (editor) {
+						const { tr } = editor.state;
+						tr.setMeta('addToHistory', false);
+						editor.view.dispatch(tr);
+						
+						// Verify comment marks are in the document state
+						const { doc } = editor.state;
+						let marksCount = 0;
+						doc.descendants((node) => {
+							if (node.marks) {
+								node.marks.forEach(mark => {
+									if (mark.type.name === 'comment') {
+										marksCount++;
+									}
+								});
+							}
+						});
+						console.log('[TextEditor] After note change - comment marks in document state:', marksCount);
+					}
+				});
+			}
+		}, 100);
+		
+		// Clean up orphaned comment marks (marks in HTML without corresponding comments)
+		// This ensures data consistency
+		setTimeout(() => {
+			if (editor && note && note.comments.length > 0) {
+				const commentIds = new Set(note.comments.map(c => c.id));
+				const { tr } = editor.state;
+				let modified = false;
+
+				tr.doc.descendants((node, pos) => {
+					if (node.marks) {
+						node.marks.forEach(mark => {
+							if (mark.type.name === 'comment' && mark.attrs.commentId) {
+								if (!commentIds.has(mark.attrs.commentId)) {
+									// Orphaned comment mark - remove it
+									tr.removeMark(pos, pos + node.nodeSize, mark.type);
+									modified = true;
+								}
+							}
+						});
+					}
+				});
+
+				if (modified) {
+					editor.view.dispatch(tr);
+					const html = editor.getHTML();
+					note.content = html;
+					onContentChange?.(html);
+				}
+			}
+		}, 150);
+		
+		// Reset comment panel state
+		selectedCommentId = null;
 	}
 
 	// Update editor theme when it changes
@@ -567,7 +983,7 @@
 	});
 </script>
 
-<div class="text-editor-container">
+<div class="text-editor-container" class:has-comment-panel={showCommentPanel}>
 	<!-- Editor -->
 	<div bind:this={editorElement} class="editor"></div>
 
@@ -684,6 +1100,18 @@
 						</div>
 					{/if}
 				</div>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Comments -->
+				<button 
+					class="toolbar-btn" 
+					class:active={showCommentPanel || isActive('comment')} 
+					on:click={addComment} 
+					title="Aggiungi commento"
+				>
+					<Icon name="message-square" size={16} />
+				</button>
 			</div>
 		</div>
 	{/if}
@@ -847,7 +1275,33 @@
 						</div>
 					{/if}
 				</div>
+
+				<div class="toolbar-separator"></div>
+
+				<!-- Comments -->
+				<button 
+					class="toolbar-btn" 
+					class:active={showCommentPanel || isActive('comment')} 
+					on:click={addComment} 
+					title="Aggiungi commento"
+				>
+					<Icon name="message-square" size={16} />
+				</button>
 			</div>
+		</div>
+	{/if}
+
+	<!-- Comment Panel -->
+	{#if showCommentPanel}
+		<div class="comment-panel-wrapper">
+			<CommentPanel
+				comments={note?.comments || []}
+				selectedCommentId={selectedCommentId}
+				onCommentAdd={handleCommentAdd}
+				onCommentUpdate={handleCommentUpdate}
+				onCommentDelete={handleCommentDelete}
+				onCommentClick={handleCommentClick}
+			/>
 		</div>
 	{/if}
 </div>
@@ -873,10 +1327,15 @@
 <style>
 	.text-editor-container {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
 		height: 100%;
 		position: relative;
 		overflow: visible;
+	}
+
+	.text-editor-container .editor {
+		flex: 1;
+		width: 100%;
 	}
 
 	.toolbar-btn {
@@ -1305,5 +1764,52 @@
 		height: 1px;
 		background: var(--border-color);
 		margin: 0.25rem 0;
+	}
+
+	/* Comment Panel */
+	.comment-panel-wrapper {
+		position: fixed;
+		right: 0;
+		top: 6rem; /* Start below header */
+		bottom: 0;
+		width: 320px;
+		z-index: 1100;
+		box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+		background: var(--bg-secondary);
+	}
+
+	/* When comment panel is open, don't add padding - panel is position:fixed and overlays */
+	/* Only add padding when inside whiteboard layout to prevent content going under panel */
+	:global(.editor-section .text-editor-container.has-comment-panel) :global(.editor-content) {
+		/* In whiteboard mode, add padding to prevent content from going under the panel */
+		padding-right: 340px;
+		transition: padding-right 0.3s ease;
+	}
+	
+	/* When NOT in whiteboard mode, no padding needed - panel overlays without affecting layout */
+	.text-editor-container.has-comment-panel :global(.editor-content) {
+		/* Keep normal padding - panel overlays */
+		padding-right: 1.5rem;
+	}
+
+	/* Comment marks in editor - use multiple selectors to ensure styles are applied */
+	:global(.editor-content .comment-mark),
+	:global(.editor-content span[data-comment-id]),
+	:global(.ProseMirror .comment-mark),
+	:global(.ProseMirror span[data-comment-id]) {
+		background: var(--accent-light, rgba(59, 130, 246, 0.15)) !important;
+		border-bottom: 2px solid var(--accent-color) !important;
+		cursor: pointer;
+		transition: var(--transition);
+		padding: 0 2px;
+		border-radius: 2px;
+		display: inline;
+	}
+
+	:global(.editor-content .comment-mark:hover),
+	:global(.editor-content span[data-comment-id]:hover),
+	:global(.ProseMirror .comment-mark:hover),
+	:global(.ProseMirror span[data-comment-id]:hover) {
+		background: var(--accent-light, rgba(59, 130, 246, 0.25)) !important;
 	}
 </style>

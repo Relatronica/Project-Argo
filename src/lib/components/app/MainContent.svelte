@@ -4,6 +4,7 @@
 	import TiptapEditor from '../TiptapEditor.svelte';
 	import Icon from '../Icon.svelte';
 	import TagManager from '../TagManager.svelte';
+	import LoadingOverlay from '../LoadingOverlay.svelte';
 
 	// Title editing state
 	let editingTitle = false;
@@ -480,6 +481,7 @@
 
 	<div class="editor-container">
 		<TiptapEditor />
+		<LoadingOverlay />
 	</div>
 </main>
 
@@ -700,6 +702,7 @@
 	.editor-container {
 		flex: 1;
 		overflow: hidden;
+		position: relative;
 	}
 
 	/* Mode toggle button */

@@ -38,6 +38,7 @@
 		Star,
 		ArrowDown,
 		ArrowUp,
+		ArrowRight,
 		Tag,
 		ChevronRight,
 		ChevronLeft,
@@ -74,7 +75,9 @@
 		CheckCircle,
 		Check,
 		Loader2,
-		Search
+		Search,
+		MessageSquare,
+		RefreshCw
 	} from 'lucide-svelte';
 
 	// Mapping delle icone più comuni che useremo nell'app
@@ -127,6 +130,7 @@
 		star: Star,
 		'arrow-down': ArrowDown,
 		'arrow-up': ArrowUp,
+		'arrow-right': ArrowRight,
 		tag: Tag,
 		'chevron-right': ChevronRight,
 		'chevron-left': ChevronLeft,
@@ -142,6 +146,8 @@
 		'x-circle': XCircle,
 		'alert-circle': AlertCircle,
 		clock: Clock,
+		'message-square': MessageSquare,
+		'refresh-cw': RefreshCw,
 		
 		// Folder icons
 		briefcase: Briefcase,

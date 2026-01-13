@@ -28,6 +28,7 @@ export class Note {
 		this.nonce = data.nonce || null;
 		this.whiteboardCiphertext = data.whiteboardCiphertext || null; // Encrypted whiteboard data
 		this.whiteboardNonce = data.whiteboardNonce || null; // Encryption nonce for whiteboard
+		this.comments = data.comments || []; // Array of comment objects
 	}
 
 	/**
@@ -103,6 +104,7 @@ export class Note {
 			nonce: this.nonce, // Store encryption nonce
 			whiteboardCiphertext: this.whiteboardCiphertext, // Store encrypted whiteboard data
 			whiteboardNonce: this.whiteboardNonce, // Store encryption nonce for whiteboard
+			comments: this.comments || [], // Store comments array
 			contentLength: this.content ? this.content.length : 0
 		};
 	}
@@ -266,7 +268,8 @@ export class Note {
 			ciphertext: this.ciphertext,
 			nonce: this.nonce,
 			whiteboardCiphertext: this.whiteboardCiphertext,
-			whiteboardNonce: this.whiteboardNonce
+			whiteboardNonce: this.whiteboardNonce,
+			comments: this.comments || []
 		};
 	}
 
